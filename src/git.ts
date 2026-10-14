@@ -7,8 +7,10 @@
  * callers can distinguish a failed read from an empty history.
  */
 
-import { exec, execFile } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
 import { promisify } from 'util';
+import { createHash } from 'crypto';
+import { isReviewFilePath } from './reviewModel';
 import { event, trace } from './diagnostics';
 
 const execAsync = promisify(exec);
@@ -121,6 +123,56 @@ export async function runGitQuery(cwd: string, args: string[], maxBuffer?: numbe
 		() => execFileAsync('git', args, { cwd, windowsHide: true, ...(maxBuffer === undefined ? {} : { maxBuffer }) }),
 		commandFields(args, 'execFile'));
 	return stdout.trim();
+}
+
+export interface GitFileEntry { mode: string; type: string; oid: string }
+
+export async function readGitFileEntries(cwd: string, commit: string, files: string[]): Promise<Map<string, GitFileEntry>> {
+	if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(commit) || files.some((file) => !isReviewFilePath(file))) {
+		throw new Error('File fingerprints require a resolved commit and repository-relative paths.');
+	}
+	const result = new Map<string, GitFileEntry>();
+	for (let offset = 0; offset < files.length;) {
+		const batch: string[] = [];
+		let size = 0;
+		while (offset < files.length && (batch.length === 0 || size + files[offset].length < 12000)) {
+			const file = files[offset++];
+			batch.push(file); size += file.length + 1;
+		}
+		// ASSUMPTION: filenames are literal pathspecs; NUL records preserve whitespace and newlines.
+		const { stdout } = await trace('reviewed.tree', () => execFileAsync('git',
+			['--literal-pathspecs', 'ls-tree', '-r', '-z', commit, '--', ...batch],
+			{ cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }));
+		for (const record of stdout.split('\0').filter(Boolean)) {
+			const tab = record.indexOf('\t');
+			const header = record.slice(0, tab).split(' ');
+			if (tab < 0 || header.length !== 3 || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(header[2])) {
+				throw new Error('Git returned invalid file fingerprint metadata.');
+			}
+			const file = record.slice(tab + 1);
+			if (batch.includes(file)) { result.set(file, { mode: header[0], type: header[1], oid: header[2] }); }
+		}
+	}
+	return result;
+}
+
+export async function hashGitBlob(cwd: string, oid: string): Promise<string> {
+	if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(oid)) { throw new Error('Invalid blob ID.'); }
+	return trace('reviewed.blobHash', async () => {
+		const child = spawn('git', ['cat-file', 'blob', oid], { cwd, windowsHide: true });
+		const hash = createHash('sha256');
+		let errorText = '';
+		child.stderr.on('data', (bytes: Buffer) => { if (errorText.length < 4096) { errorText += bytes.toString('utf8'); } });
+		const completion = new Promise<void>((resolve, reject) => {
+			child.once('error', reject);
+			child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`Git blob read failed (${code}): ${errorText.trim()}`)));
+		});
+		await Promise.all([
+			(async () => { for await (const bytes of child.stdout) { hash.update(bytes); } })(),
+			completion,
+		]);
+		return hash.digest('hex');
+	});
 }
 
 /** The repository root for `cwd` (`git rev-parse --show-toplevel`), or undefined. */

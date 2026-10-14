@@ -49,6 +49,7 @@ import { initUsage, setUsageEnabled, recordUsage, usageEditor, usageFocus, usage
 import { classifyEditorInput, editorInputIdentity } from './usageContext';
 import { ConversationDocumentProvider, CONVERSATION_SCHEME } from './conversationDocument';
 import { ConversationPages, CONVERSATION_PAGE_TYPE } from './conversationPage';
+import { ReviewedFiles } from './reviewedFiles';
 
 /** Shared "Searchlight" output channel for user-visible git/action feedback. Assigned in `activate`. */
 let outputChannel: vscode.OutputChannel | undefined;
@@ -264,11 +265,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		},
 	);
 	const conversationsProvider = new ConversationsWebviewProvider(() => active, context.workspaceState);
+	const reviewedFiles = new ReviewedFiles(() => active, () => filesProvider.refreshAvailability(), log);
+	context.subscriptions.push(reviewedFiles);
 	const filesProvider = new FilesWebviewProvider(
 		() => active,
 		statusBar,
 		() => conversationsProvider.refresh(),
 		context.workspaceState,
+		reviewedFiles,
 	);
 
 	context.subscriptions.push(
@@ -308,6 +312,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		// Dispatch stays fire-and-forget; child spans retain this refresh's correlation context.
 		void trace('refresh.dispatch', async () => {
 			event('refresh.request', { reason });
+			reviewedFiles.reconcile(reason);
 			if (reason === 'manual-refresh' || reason === 'manual-resolve-refresh') { conversationDocuments.refresh(); }
 			if (reason === 'manual-refresh' || reason === 'manual-resolve-refresh') { conversationPages.refresh(); }
 			comparisonProvider.refresh(['manual-refresh', 'manual-resolve-refresh', 'git-operation'].includes(reason));
@@ -1079,16 +1084,12 @@ async function pickBranches(review: Review | undefined, refreshAll: () => void):
 		return;
 	}
 
-	const fresh = await store.loadReview(vscode.Uri.file(target.sourceFile));
-	if (!fresh) {
-		void vscode.window.showErrorMessage('Searchlight: could not load the review file.');
-		return;
-	}
-	fresh.sourceBranch = source.name;
-	fresh.sourceCommit = source.commit;
-	fresh.targetBranch = base.name;
-	fresh.targetCommit = base.commit;
-	await store.saveReview(fresh);
+	await store.updateReview(target.sourceFile, (fresh) => {
+		fresh.sourceBranch = source.name;
+		fresh.sourceCommit = source.commit;
+		fresh.targetBranch = base.name;
+		fresh.targetCommit = base.commit;
+	});
 	void vscode.window.showInformationMessage(
 		`Searchlight: review set to ${source.name} → ${base.name}.`,
 	);

@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { Review, parseReview } from './reviewModel';
 import { ConversationTarget } from './conversationModel';
 import { parseConversationTarget, validateConversationReviewFile } from './conversationDocument';
-import { computeReviewPaths, emptyReview, saveReview } from './reviewStore';
+import { computeReviewPaths, emptyReview, saveReview, queueReviewUpdate, readReviewText } from './reviewStore';
 import { trace } from './diagnostics';
 
 interface ReviewSeed {
@@ -65,14 +65,7 @@ export function parsePageReference(value: unknown): PageReference {
 }
 
 async function readRaw(file: string): Promise<string | undefined> {
-	try {
-		const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(file));
-		return Buffer.from(bytes).toString('utf8');
-	} catch (error) {
-		if (typeof error === 'object' && error !== null && 'code' in error &&
-			(error.code === 'FileNotFound' || error.code === 'ENOENT')) { return undefined; }
-		throw error;
-	}
+	return readReviewText(file);
 }
 
 export async function readPageReview(reference: PageReference): Promise<{ review: Review; raw?: string }> {
@@ -98,16 +91,12 @@ export async function readPageReview(reference: PageReference): Promise<{ review
 
 /** Serialize page mutations per review and reload the latest saved replies before every mutation. */
 export class ConversationUpdates {
-	private readonly tails = new Map<string, Promise<void>>();
-
 	update<T>(reference: PageReference, mutate: (review: Review) => T): Promise<{ review: Review; value: T }> {
-		const key = reviewFileKey(reference.reviewFile);
-		const previous = this.tails.get(key) ?? Promise.resolve();
-		const result = previous.then(async () => {
+		return queueReviewUpdate(reference.reviewFile, async () => {
 			const snapshot = await readPageReview(reference);
 			const value = mutate(snapshot.review);
 			// ASSUMPTION: VS Code has no cross-process compare-and-swap file API. Detect observed
-			// external edits instead of overwriting them; this queue serializes page actions only.
+			// external edits instead of overwriting them; the queue covers extension-owned mutations.
 			await saveReview(snapshot.review, async () => {
 				if (await readRaw(reference.reviewFile) !== snapshot.raw) {
 					throw new Error('The review changed while saving. Refresh and try again; your draft is retained.');
@@ -116,10 +105,5 @@ export class ConversationUpdates {
 			reference.allowCreate = false;
 			return { review: snapshot.review, value };
 		});
-		// A failed operation must not block the next attempt; callers still receive its rejection.
-		const tail = result.then(() => undefined, () => undefined);
-		this.tails.set(key, tail);
-		void tail.then(() => { if (this.tails.get(key) === tail) { this.tails.delete(key); } });
-		return result;
 	}
 }

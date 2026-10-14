@@ -4,7 +4,7 @@
  * 1:1 behavioral parity with the former `FilesViewProvider` (src/filesView.ts):
  *   - hierarchical folder tree, folders-first then alphabetical, files nested under folders,
  *   - "Loading changes…" placeholder until the changed-files data resolves,
- *   - per-file checkbox bound to `review.reviewedFiles` (toggle persists via the store),
+ *   - per-file checkbox backed by saved comparison fingerprints,
  *   - click a file row → `searchlight.openFileDiff` with the file's relPath,
  *   - expand-all via `setExpanded(true)` (host command `searchlight.filesExpandAll`).
  *
@@ -22,7 +22,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { ActiveComparison } from './activeComparison';
 import { ReviewStatusBar } from './statusBar';
-import * as store from './reviewStore';
+import type { ReviewedFiles, ReviewAvailability } from './reviewedFiles';
 import { webviewHtml, getNonce } from './webviewShell';
 import { logBuild, PaneMetrics } from './webviewMetrics';
 import { event, now, trace } from './diagnostics';
@@ -48,6 +48,8 @@ interface WireFile {
 	uncommitted: boolean;
 	/** Set only when `uncommitted` — drives the group-aware diff on click. */
 	group?: UncommittedGroup;
+	reviewState?: ReviewAvailability;
+	reviewUnavailable?: string;
 }
 
 /** Which uncommitted group a row belongs to (drives the diff sides in uc-3). */
@@ -67,7 +69,7 @@ interface MergedFile {
 
 type IncomingMessage =
 	| { type: 'ready' }
-	| { type: 'toggleReviewed'; relPath: string }
+	| { type: 'setReviewed'; relPath: string; reviewed: boolean; reviewKey: string }
 	| { type: 'openFile'; relPath: string }
 	| { type: 'openUncommitted'; relPath: string; group: UncommittedGroup }
 	| { type: 'openCumulative'; relPath: string }
@@ -109,12 +111,14 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 	private paths: ChangedFile[] = [];
 	private loadedKey?: string;
 	private loadingKey?: string;
+	private rows = new Map<string, MergedFile>();
 
 	constructor(
 		private readonly getActive: () => ActiveComparison | undefined,
 		private readonly statusBar: ReviewStatusBar,
 		private readonly refreshConversations: () => void,
 		private readonly workspaceState: vscode.Memento,
+		private readonly reviewedFiles?: ReviewedFiles,
 	) {}
 
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -127,9 +131,9 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 				case 'ready':
 					await this.postState('client-ready');
 					break;
-				case 'toggleReviewed':
-					if (msg.relPath) {
-						await this.onToggleReviewed(msg.relPath);
+				case 'setReviewed':
+					if (msg.relPath && typeof msg.reviewed === 'boolean') {
+						await this.onSetReviewed(msg.relPath, msg.reviewed, msg.reviewKey);
 					}
 					break;
 				case 'openFile':
@@ -166,6 +170,18 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 		void this.postState();
 	}
 
+	refreshAvailability(): void {
+		if (!this.reviewedFiles) { return; }
+		this.view?.webview.postMessage({
+			type: 'reviewAvailability', reviewKey: this.reviewedFiles.key,
+			values: Object.fromEntries([...this.rows.keys()].map((file) => [file, this.reviewedFiles!.availability(file)])),
+		});
+	}
+
+	private post(message: Record<string, unknown>): void {
+		this.metrics.post({ ...message, reviewKey: this.reviewedFiles?.key ?? '' });
+	}
+
 	/**
 	 * Show/hide uncommitted working-tree rows. Driven by the `view/title` buttons rather than an
 	 * in-tree control: a control rendered inside the webview disappeared along with the rows it
@@ -184,24 +200,25 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 		this.view?.webview.postMessage({ type: 'setExpanded', value });
 	}
 
-	/** Migrated from extension.ts's Files checkbox handler — toggle a file's reviewed state + persist. */
-	private async onToggleReviewed(relPath: string): Promise<void> {
-		const active = this.getActive();
-		const review = active?.review;
-		if (!review) {
-			return;
+	private async onSetReviewed(relPath: string, checked: boolean, key: string): Promise<void> {
+		try {
+			const row = this.rows.get(relPath);
+			if (!this.reviewedFiles || !row || key !== this.reviewedFiles.key) {
+				throw new Error('The Files comparison changed. Refresh before changing reviewed state.');
+			}
+			if (row.uncommitted && !this.getActive()?.compareIsHead) {
+				throw new Error('Select the checked-out source branch to review working-tree changes.');
+			}
+			await this.reviewedFiles.setReviewed(relPath, checked, key);
+			this.refreshAvailability();
+			this.refreshConversations();
+			void this.statusBar.update();
+		} catch (error) {
+			event('reviewed.actionFailed');
+			console.error('[searchlight] Reviewed-state action failed:', error);
+			void vscode.window.showWarningMessage(`Searchlight: ${error instanceof Error ? error.message : String(error)}`);
+			this.refreshAvailability();
 		}
-		review.reviewedFiles ??= [];
-		const idx = review.reviewedFiles.indexOf(relPath);
-		if (idx === -1) {
-			review.reviewedFiles.push(relPath);
-		} else {
-			review.reviewedFiles.splice(idx, 1);
-		}
-		await store.saveReview(review);
-		this.refresh();
-		this.refreshConversations();
-		void this.statusBar.update();
 	}
 
 	/**
@@ -270,7 +287,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 		const hideUncommitted = isUncommittedHidden(this.workspaceState);
 		const active = this.getActive();
 		if (!active || !active.base || !active.compare || !active.baselineCommit) {
-			this.metrics.post({ type: 'state', tree: null, error: active?.baselineError, expanded: this.filesExpanded, hideUncommitted, ucHidden: 0, revealPath: this.revealPath, cumulative: false });
+			this.post({ type: 'state', tree: null, error: active?.baselineError, expanded: this.filesExpanded, hideUncommitted, ucHidden: 0, revealPath: this.revealPath, cumulative: false });
 			return;
 		}
 
@@ -308,7 +325,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 				compactTree(treeCum);
 			}
 			logBuild('files', tBuildCum, visibleCum.length, treeCum);
-			this.metrics.post({
+			this.post({
 				type: 'state',
 				tree: treeCum,
 				expanded: this.filesExpanded,
@@ -338,7 +355,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 						event('files.loadFailed', { fallback: 'loading-placeholder' });
 					});
 			}
-			this.metrics.post({ type: 'state', loading: true, expanded: this.filesExpanded, hideUncommitted, ucHidden: 0, revealPath: this.revealPath, cumulative: false });
+			this.post({ type: 'state', loading: true, expanded: this.filesExpanded, hideUncommitted, ucHidden: 0, revealPath: this.revealPath, cumulative: false });
 			return;
 		}
 
@@ -365,7 +382,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 		const count = visible.length;
 		logBuild('files', tBuild, count, tree);
 		const ucHidden = hideUncommitted ? ucTotal : 0;
-		this.metrics.post({ type: 'state', tree, expanded: this.filesExpanded, hideUncommitted, ucHidden, revealPath: this.revealPath, cumulative: false });
+		this.post({ type: 'state', tree, expanded: this.filesExpanded, hideUncommitted, ucHidden, revealPath: this.revealPath, cumulative: false });
 	}
 
 	/**
@@ -388,6 +405,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 	 * the same shape filesView.ts's buildTree/renderLevel produced, but serializable.
 	 */
 	private buildTree(files: MergedFile[]): WireDir {
+		this.rows = new Map(files.map((file) => [file.relPath, file]));
 		const root: WireDir = { name: '', relPath: '', dirs: [], files: [] };
 
 		for (const p of files) {
@@ -413,6 +431,9 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 				status: p.status,
 				uncommitted: p.uncommitted,
 				group: p.group,
+				reviewState: this.reviewedFiles?.availability(p.relPath),
+				reviewUnavailable: p.uncommitted && !this.getActive()?.compareIsHead
+					? 'Select the checked-out source branch to review working-tree changes.' : undefined,
 			});
 		}
 
@@ -456,9 +477,8 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
  * `review.reviewedFiles` list. This is unambiguous because the merged tree is deduped to exactly ONE
  * row per repo-relative path, so one path ⇒ one checkbox ⇒ one list entry.
  *
- * // ASSUMPTION: a file reviewed while committed-only keeps its checkmark if it later gains
- * // working-tree edits. Auto-clearing the mark on content change (via hashing or an mtime watch) was
- * // deliberately NOT implemented — staleness on uncommitted rows is accepted.
+ * // ASSUMPTION: checkmarks certify the whole saved comparison, not a staged/unstaged slice.
+ * // The reviewed-file coordinator clears stale marks independently of row rendering.
  */
 function mergeFiles(committed: ChangedFile[], uc: UncommittedChanges, reviewedFiles: string[]): MergedFile[] {
 	const reviewed = new Set(reviewedFiles);
@@ -633,6 +653,8 @@ const FILES_CSS = `
 .children { display: block; }
 .dir.collapsed > .children { display: none; }
 input.chk { margin: 0 2px 0 0; }
+.review-note { margin-left: 4px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+.review-note[hidden] { display: none; }
 `;
 
 /** Pane-specific script. The shared shell has already defined `vscode`, `reportRendered`, etc. */
@@ -658,6 +680,39 @@ let ucHidden = 0;              // count of uncommitted leaves the host filtered 
 let revealPath = null;         // relPath of the row mirroring the active editor (auto-reveal)
 let revealedEl = null;         // the rendered .row for revealPath, so paint() can scroll to it
 let cumulative = false;        // host-authoritative; in cumulative mode EVERY row opens one merged diff
+let reviewKey = '';
+let reviewAvailability = {};
+
+function updateReviewCheckbox(row, f) {
+	const state = reviewAvailability[f.relPath] || f.reviewState || {};
+	const checkbox = row.querySelector('.chk');
+	const note = row.querySelector('.review-note');
+	const reason = state.dirty ? 'Save or discard unsaved changes before changing reviewed state.' :
+		f.reviewUnavailable || (state.error ? state.error + ' Use Refresh to retry.' :
+		state.pending ? 'Validating saved reviewed state.' : '');
+	checkbox.checked = typeof state.reviewed === 'boolean' ? state.reviewed : !!f.reviewed;
+	checkbox.disabled = !!reason;
+	checkbox.title = reason || 'Mark the complete baseline-to-saved-file change reviewed';
+	checkbox.setAttribute('aria-label', f.relPath + ': ' + checkbox.title);
+	note.textContent = state.dirty ? 'Unsaved' : f.reviewUnavailable ? 'Unavailable' :
+		state.error ? 'Validation failed' : state.pending ? 'Validating' : '';
+	note.hidden = !note.textContent;
+	note.title = reason;
+	note.tabIndex = reason ? 0 : -1;
+	row.title = reason;
+}
+
+function configureReviewCheckbox(row, checkbox, f) {
+	const note = document.createElement('span');
+	note.className = 'review-note';
+	row.appendChild(note);
+	checkbox.addEventListener('click', (e) => e.stopPropagation());
+	checkbox.addEventListener('change', () => {
+		checkbox.disabled = true;
+		vscode.postMessage({ type: 'setReviewed', relPath: f.relPath, reviewed: checkbox.checked, reviewKey });
+	});
+	updateReviewCheckbox(row, f);
+}
 
 // \`expandAll\` renders every folder open while \`expanded\` stays empty, so a naive toggle would leave
 // only the clicked folder in the Set and collapse everything else. Materialize the currently-visible
@@ -730,6 +785,8 @@ function renderDir(dir, depth) {
 	}
 	for (const f of dir.files) {
 		const row = document.createElement('div');
+		row.dataset.relPath = f.relPath;
+		row.reviewFile = f;
 		row.className = 'row file' + (f.status ? ' st-' + f.status : '') + (f.uncommitted ? ' uncommitted' : '') + (f.relPath === revealPath ? ' revealed' : '');
 		row.style.paddingLeft = (depth * INDENT_PX) + 'px';
 		if (f.relPath === revealPath) { revealedEl = row; }
@@ -742,12 +799,6 @@ function renderDir(dir, depth) {
 			const chk = document.createElement('input');
 			chk.type = 'checkbox';
 			chk.className = 'chk';
-			chk.checked = !!f.reviewed;
-			chk.title = 'Mark reviewed';
-			chk.addEventListener('click', (e) => e.stopPropagation());   // don't trigger the row's diff-open
-			chk.addEventListener('change', () => {
-				vscode.postMessage({ type: 'toggleReviewed', relPath: f.relPath });
-			});
 			const marker = document.createElement('span');
 			marker.className = 'uc-marker';
 			marker.textContent = '\\u25CF';
@@ -763,6 +814,7 @@ function renderDir(dir, depth) {
 			row.appendChild(marker);
 			row.appendChild(glyph);
 			row.appendChild(label);
+			configureReviewCheckbox(row, chk, f);
 			if (f.status) {
 				const st = document.createElement('span');
 				st.className = 'status';
@@ -781,12 +833,6 @@ function renderDir(dir, depth) {
 			const chk = document.createElement('input');
 			chk.type = 'checkbox';
 			chk.className = 'chk';
-			chk.checked = !!f.reviewed;
-			chk.title = 'Mark reviewed';
-			chk.addEventListener('click', (e) => e.stopPropagation());
-			chk.addEventListener('change', () => {
-				vscode.postMessage({ type: 'toggleReviewed', relPath: f.relPath });
-			});
 			const glyph = document.createElement('span');
 			glyph.className = 'glyph';
 			glyph.innerHTML = FILE_SVG;
@@ -797,6 +843,7 @@ function renderDir(dir, depth) {
 			row.appendChild(chk);
 			row.appendChild(glyph);
 			row.appendChild(label);
+			configureReviewCheckbox(row, chk, f);
 			if (f.status) {
 				const st = document.createElement('span');
 				st.className = 'status';
@@ -873,6 +920,8 @@ function countFiles(dir) {
 window.addEventListener('message', (e) => {
 	const m = e.data;
 	if (m.type === 'state') {
+		reviewKey = m.reviewKey || '';
+		reviewAvailability = {};
 		comparisonError = m.error || null;
 		if (m.loading) {
 			lastTree = undefined;   // sentinel → "Loading changes…"
@@ -890,6 +939,9 @@ window.addEventListener('message', (e) => {
 		revealPath = typeof m.revealPath === 'string' ? m.revealPath : null;
 		expandToReveal();
 		paint();
+	} else if (m.type === 'reviewAvailability' && m.reviewKey === reviewKey) {
+		reviewAvailability = m.values || {};
+		for (const row of rows.querySelectorAll('.row.file')) { updateReviewCheckbox(row, row.reviewFile); }
 	} else if (m.type === 'reveal') {
 		revealPath = m.relPath || null;
 		expandToReveal();

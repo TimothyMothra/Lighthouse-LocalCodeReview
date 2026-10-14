@@ -35,6 +35,7 @@ extension.ts ............ activation, view wiring, command registration, Ask-Cop
   ├─ comparisonView.ts .... WebviewView: selectors, effective baseline, commit data/actions
   │      └─ commitsWebview.ts .. embedded compact commit-tree CSS + script
   ├─ filesWebview.ts ...... WebviewView: changed files (folder tree, reviewed-file checkboxes)
+  ├─ reviewedFiles.ts ..... saved-only fingerprints, checked-path watches and coalesced validation
   ├─ conversationsWebview.ts .. WebviewView: threads -> comments, jump to file:line
   ├─ conversationDocument.ts . read-only virtual conversation tabs, independent of code files
   ├─ conversationModel.ts .... full transcript formatting and stable conversation references
@@ -211,6 +212,26 @@ doing git work in the background keeps the panel responsive.
 
 `refreshAll()` refreshes all three providers, re-renders the CommentController from disk, and updates
 the status bar.
+
+Reviewed-file validation is separate from pane rendering. `ReviewedFiles` records the effective
+baseline's per-file Git identity and the final saved source fingerprint when a file is checked.
+Both cumulative and split views use this whole-file contract. Saves and checked-path filesystem
+events schedule affected files; Git notifications use cheap metadata hints, and selection/reload/
+manual Refresh reconcile the stored checklist. Unchanged immutable endpoints and saved metadata
+reuse cached results; explicit Refresh and source-change events force saved-byte validation.
+There is no polling or hashing on unsaved typing, comment-only refreshes, or ordinary UI redraws.
+
+Dirty-editor transitions send availability-only messages, not full Files data reloads. The entire
+checkbox is disabled with a visible `Unsaved` explanation until save/discard. Changed fingerprints
+clear checks persistently, never automatically rechecking on undo. Legacy path-only checks are
+cleared lazily on first review use without discarding discussion data. Failed validation remains
+explicitly unverified instead of treating errors as deletions.
+
+The store serializes all extension-owned read-modify-write review operations through a shared
+per-file queue, including inline comments, formal discussion pages and checklist invalidation.
+It reloads latest content and guards against observed external writes. Comparison identities and
+file-event generations prevent delayed hashes or checkbox messages from mutating another review;
+the filesystem guard does not provide cross-process atomicity.
 
 Review discovery walks only each workspace's `.vscode/searchlight-reviews` subtree, not the
 workspace search index. Simultaneous discovery requests share the in-flight directory walk;

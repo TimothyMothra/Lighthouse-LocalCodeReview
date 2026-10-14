@@ -22,6 +22,7 @@ all of `node_modules` from the VSIX.
 | `out/` | Compiled `*.js` (gitignored build output; what VS Code actually runs) |
 | `scripts/deploy-local.ps1` | Package + sideload into the host VS Code |
 | `scripts/comparison.test.cjs` | Git ancestry, automatic-target, comparison-state, and webview regression tests |
+| `scripts/reviewed-files.test.cjs` | Saved-content checklist invalidation, dirty-checkbox UX and guarded-write regressions |
 | `docs/` | This knowledge base |
 | `package.json` | Manifest: commands, views, menus, configuration, activation |
 | `tsconfig.json` | TS config (target/module, `out/` outDir) |
@@ -166,6 +167,17 @@ The read-only Git-query fixtures cover advancing/stale target refs, rebases, sta
 explicit remote selection, ambiguous ancestry, pin persistence/reset/invalidation, and consistent
 baseline endpoints across file lists, commits and diff editors. They do not modify any Git refs,
 index, or working-tree files. No extension host or additional test dependency is required.
+
+`reviewed-files.test.cjs` covers two-sided fingerprints, legacy-check reset, saved-only invalidation,
+staging/commit and baseline identity, hidden/deleted files, binary and literal-path Git reads,
+dirty-editor disabling, stale work, shared review-write guards and explicit failures. Operation-count
+assertions require no saved hashes for unsaved typing, unchecked paths, comment-only refreshes or
+unchanged metadata hints, and one hash for coalesced same-path save/filesystem bursts. The shipped
+Files client is executed to check both checkbox variants and availability-only updates. Run the
+focused suite with `npm run compile` followed by
+`node --test scripts\reviewed-files.test.cjs`; `npm test` includes it automatically.
+Native disabled-control presentation and actual VS Code event delivery still need an isolated
+extension-host smoke check when desktop automation is available.
 
 ## 9. Known constraints
 

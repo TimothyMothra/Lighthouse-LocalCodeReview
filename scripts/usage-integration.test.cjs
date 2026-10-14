@@ -89,9 +89,14 @@ function commentFixture() {
 		scanReviews: async () => { scans++; return [review]; },
 		loadReview: async () => review,
 		saveReview: async (value) => saved.push(value),
+		updateReview: async (_file, mutate) => {
+			const value = await mutate(review);
+			await store.saveReview(review);
+			return { review, value };
+		},
 		humanAuthor: () => ({ kind: 'human', name: 'private-author' }),
-		addReply() {}, addThreadTags() {}, addThread() {},
-		setThreadState: (value, id, state) => { value.threads.find((thread) => thread.id === id).state = state; },
+		addReply() { return {}; }, addThreadTags() {}, addThread() {},
+		setThreadState: (value, id, state) => { value.threads.find((thread) => thread.id === id).state = state; return true; },
 	};
 	const { SearchlightCommentController } = loadCompiled('commentController', {
 		vscode, './reviewStore': store, './git': { getGitUserName: async () => 'private-author' },

@@ -96,7 +96,7 @@ export class PaneMetrics {
 			}
 			if (typeof msg === 'object' && msg !== null && 'type' in msg && typeof msg.type === 'string') {
 				const action = msg.type === 'usageAction' && 'action' in msg && typeof msg.action === 'string'
-					? msg.action : msg.type === 'expand' ? undefined : msg.type;
+					? msg.action : msg.type === 'expand' ? undefined : msg.type === 'setReviewed' ? 'toggleReviewed' : msg.type;
 				// The recorder allowlists actions; never forward the message's paths, refs or contents.
 				if (action) { recordUsage('pane.action', { pane: this.name, action }); }
 			}

@@ -102,7 +102,8 @@ message creates the review directory/file as needed.
 
 | Type | Fields |
 |------|--------|
-| `Review` | `version`, `sourceBranch?`, `targetBranch?`, `sourceCommit?`, `targetCommit?`, `threads[]`, `reviewedFiles?[]`, `seqCounter?`, `sourceFile` (in-memory only) |
+| `Review` | `version`, `sourceBranch?`, `targetBranch?`, `sourceCommit?`, `targetCommit?`, `threads[]`, `reviewedFiles?[]`, `reviewedFileSnapshots?`, `seqCounter?`, `sourceFile` (in-memory only) |
+| `ReviewedFileSnapshot` | `version: 1`, `left`, `right`; each side is absent or carries `kind`, `hash`, `mode` |
 | `ReviewThread` | `id?`, `filePath?`, `startLine?`, `endLine?`, `state?` (`unresolved`\|`resolved`), `seq?` (1-based display id), `tags[]`, `comments[]` |
 | `ReviewComment` | `id?`, `body`, `timestamp?`, `replyTo?`, `author?` |
 | `ReviewAuthor` | `kind` (`human`\|`agent`\|`unknown`), `name`, `model?`, `reasoning?`, `version?`, `sessionId?` (agent-only) |
@@ -111,7 +112,7 @@ message creates the review directory/file as needed.
 
 - **Always writes v2.** `serializeReview` emits `version: 2` regardless of what was read.
 - **Diff-friendly.** 2-space indent + trailing newline.
-- **Sparse.** `reviewedFiles` and `seqCounter` are only written when present/non-empty; `author`
+- **Sparse.** `reviewedFiles`, `reviewedFileSnapshots` and `seqCounter` are only written when present/non-empty; `author`
   sub-fields (`model`/`reasoning`/`version`/`sessionId`) only when set.
 - **No uuid dependency.** Ids come from `newId(prefix)` = `<prefix>-<Date.now(base36)>-<rand6>`.
 
@@ -152,8 +153,47 @@ from a momentarily-empty thread set.
 ## 8. Reviewed-files checklist
 
 `reviewedFiles` is an array of repo-relative paths the reviewer has checked off in the Changed Files
-view. Toggling a file's checkbox mutates the array and calls `saveReview` (which lazily creates
-`comments.json` if it doesn't exist yet).
+view. Each checked path also has an additive v2 `reviewedFileSnapshots` entry:
+
+```jsonc
+"reviewedFileSnapshots": {
+  "src/app.js": {
+    "version": 1,                  // fingerprint format, not the review schema version
+    "left":  { "kind": "file", "hash": "<Git blob ID>", "mode": "100644" },
+    "right": { "kind": "file", "hash": "<64-character SHA-256>", "mode": "100644" }
+  }
+}
+```
+
+The left side is the file at the **effective baseline**, not necessarily the target tip.
+The right side is the saved working file when the source is checked out, or the immutable
+source file otherwise. `kind` is `file` or `symlink`; a missing endpoint is exactly
+`{ "kind": "absent" }`, distinct from an empty file. Modes include meaningful executable/link
+changes. Working bytes are hashed in bounded chunks; immutable source hashes are cached.
+No file content is stored in a snapshot.
+
+Checking certifies the complete baseline-to-saved-source change even in split mode. Staging,
+unstaging, and committing identical content do not invalidate it. Saved edits, external changes,
+or changed baseline content uncheck the affected file. A different commit with identical file
+endpoints does not. Once invalidated, a check is never restored automatically by undoing an edit.
+
+**Unsaved edits are not fingerprinted.** They disable the entire applicable checkbox, including
+manual unchecking; an `Unsaved` label and tooltip explain how to restore availability. Saving
+validates the saved bytes, while discarding edits simply restores checkbox availability.
+Working-tree overlays for a different, non-HEAD source cannot certify that source's content.
+
+On first use, legacy checks without valid snapshots are cleared and the user is notified;
+comments and thread sequence counters remain intact. Inactive reviews are not bulk migrated.
+Source saves and checked-path filesystem events trigger debounced validation, while Git events
+provide metadata hints. Startup/review selection and explicit Refresh reconcile persisted checks,
+including hidden/deleted paths. Comment-only/UI refreshes do not launch file-hash scans.
+Changes made and restored before validation, or while inactive, are not an edit history.
+
+Checklist and discussion mutations share a per-review queue, reload the latest JSON, and reject
+observed external edits before writing. This is not an atomic cross-process compare-and-swap.
+Unreadable files, failed Git queries, and write errors are reported as unverified/error states,
+never substituted with empty content. Checking remains a lazy first mutation that creates
+`comments.json`; mere rendering does not.
 
 ## 9. Helper functions (reviewModel.ts, `vscode`-free)
 
@@ -162,6 +202,9 @@ view. Toggling a file's checkbox mutates the array and calls `saveReview` (which
 | `parseReview(data, sourceFile)` | tolerant v1/v2 parse → `Review` |
 | `parseAuthor(raw)` | `string \| object` → `ReviewAuthor` |
 | `normalizeSeq(review)` | one-time legacy `seq`/`seqCounter` migration |
+| `sameReviewedSnapshot(a, b)` | compare both saved endpoints and meaningful metadata |
+| `setFileReviewed(review, file, snapshot?)` | add a certified check, or remove its check and snapshot |
+| `clearLegacyReviewedFiles(review)` | clear uncertifiable legacy checks without changing discussions |
 | `newId(prefix)` | uuid-free id generator |
 | `formatTimestamp(iso)` | friendly local time, e.g. `Jul 4, 7:12 PM` (falls back to raw) |
 | `authorDisplay(author)` | `{ name, iconId }` — `hubot` for agents, `account` for human/unknown (callers wrap `iconId` with `vscode.ThemeIcon`) |

@@ -20,6 +20,51 @@ import { event, trace } from './diagnostics';
 export const REVIEWS_GLOB = '.vscode/searchlight-reviews/**/comments.json';
 
 const discoveryInFlight = new Map<string, Promise<vscode.Uri[]>>();
+const mutationTails = new Map<string, Promise<void>>();
+
+export function queueReviewUpdate<T>(file: string, operation: () => Promise<T>): Promise<T> {
+	const key = process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
+	const result = (mutationTails.get(key) ?? Promise.resolve()).then(operation);
+	const tail = result.then(() => undefined, () => undefined);
+	mutationTails.set(key, tail);
+	void tail.then(() => { if (mutationTails.get(key) === tail) { mutationTails.delete(key); } });
+	return result;
+}
+
+export async function readReviewText(file: string): Promise<string | undefined> {
+	try {
+		return Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.file(file))).toString('utf8');
+	} catch (error) {
+		if (isMissing(error)) { return undefined; }
+		throw error;
+	}
+}
+
+export function updateReview<T>(
+	file: string,
+	mutate: (review: Review) => T | Promise<T>,
+	options: { seed?: Review; beforeWrite?: () => void | Promise<void> } = {},
+): Promise<{ review: Review; value: T }> {
+	return queueReviewUpdate(file, async () => {
+		const raw = await readReviewText(file);
+		const review = raw === undefined
+			? options.seed && parseReview(JSON.stringify(serializeReview(options.seed)), file)
+			: parseReview(raw, file);
+		if (!review) { throw new Error('The saved review is missing or invalid. Refresh before trying again.'); }
+		const before = JSON.stringify(review);
+		const value = await mutate(review);
+		if (JSON.stringify(review) !== before || raw === undefined) {
+			await saveReview(review, async () => {
+				await options.beforeWrite?.();
+				// ASSUMPTION: this guards observed external edits, not an atomic cross-process CAS.
+				if (await readReviewText(file) !== raw) {
+					throw new Error('The review changed while saving. Refresh and try again.');
+				}
+			});
+		}
+		return { review, value };
+	});
+}
 
 function isMissing(error: unknown): boolean {
 	return typeof error === 'object' && error !== null && 'code' in error &&
@@ -207,6 +252,9 @@ export function serializeReview(review: Review): Record<string, unknown> {
 		// Only emit reviewedFiles when non-empty, to keep files diff-friendly.
 		...(review.reviewedFiles && review.reviewedFiles.length > 0
 			? { reviewedFiles: review.reviewedFiles }
+			: {}),
+		...(review.reviewedFileSnapshots && Object.keys(review.reviewedFileSnapshots).length > 0
+			? { reviewedFileSnapshots: review.reviewedFileSnapshots }
 			: {}),
 		...(review.seqCounter !== undefined ? { seqCounter: review.seqCounter } : {}),
 	};

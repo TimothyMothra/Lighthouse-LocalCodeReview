@@ -57,6 +57,16 @@ export interface ReviewThread {
 	comments: ReviewComment[];
 }
 
+export type ReviewedFileSide =
+	| { kind: 'absent' }
+	| { kind: 'file' | 'symlink'; hash: string; mode: string };
+
+export interface ReviewedFileSnapshot {
+	version: 1;
+	left: ReviewedFileSide;
+	right: ReviewedFileSide;
+}
+
 export interface Review {
 	/** Schema version as found in the file (1 or 2); defaults to 1 when absent. */
 	version: number;
@@ -67,10 +77,73 @@ export interface Review {
 	threads: ReviewThread[];
 	/** Repo-relative paths (forward slashes) the reviewer has marked as reviewed. */
 	reviewedFiles?: string[];
+	/** Saved-only, whole-file comparison fingerprints; absent in legacy checklists. */
+	reviewedFileSnapshots?: Record<string, ReviewedFileSnapshot>;
 	/** Monotonic high-water mark for thread.seq. Never decremented; new threads use ++seqCounter. Absent in pre-counter (legacy) files → triggers one-time migration. */
 	seqCounter?: number;
 	/** Absolute path to the comments.json this review was parsed from. */
 	sourceFile: string;
+}
+
+export function isReviewFilePath(value: string): boolean {
+	return value.length > 0 && !value.includes('\0') && !value.includes('\\') &&
+		!value.startsWith('/') && value.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
+}
+
+function parseReviewedSide(raw: unknown, right: boolean): ReviewedFileSide | undefined {
+	if (typeof raw !== 'object' || raw === null || !('kind' in raw)) { return undefined; }
+	if (raw.kind === 'absent') { return { kind: 'absent' }; }
+	if ((raw.kind !== 'file' && raw.kind !== 'symlink') ||
+		!('hash' in raw) || typeof raw.hash !== 'string' ||
+		!(right ? /^[0-9a-f]{64}$/ : /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/).test(raw.hash) ||
+		!('mode' in raw) || typeof raw.mode !== 'string' ||
+		!(raw.kind === 'symlink' ? raw.mode === '120000' : /^100(?:644|755)$/.test(raw.mode))) {
+		return undefined;
+	}
+	return { kind: raw.kind, hash: raw.hash, mode: raw.mode };
+}
+
+function parseReviewedSnapshots(raw: unknown): Record<string, ReviewedFileSnapshot> | undefined {
+	if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) { return undefined; }
+	const entries: [string, ReviewedFileSnapshot][] = [];
+	for (const [file, value] of Object.entries(raw)) {
+		if (!isReviewFilePath(file) || typeof value !== 'object' || value === null ||
+			!('version' in value) || value.version !== 1 || !('left' in value) || !('right' in value)) { continue; }
+		const left = parseReviewedSide(value.left, false), right = parseReviewedSide(value.right, true);
+		if (left && right) { entries.push([file, { version: 1, left, right }]); }
+	}
+	return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+export function sameReviewedSnapshot(left: ReviewedFileSnapshot, right: ReviewedFileSnapshot): boolean {
+	const sameSide = (a: ReviewedFileSide, b: ReviewedFileSide): boolean =>
+		a.kind === 'absent' ? b.kind === 'absent' :
+			b.kind !== 'absent' && a.kind === b.kind && a.hash === b.hash && a.mode === b.mode;
+	return left.version === right.version && sameSide(left.left, right.left) && sameSide(left.right, right.right);
+}
+
+export function setFileReviewed(review: Review, file: string, snapshot?: ReviewedFileSnapshot): void {
+	if (!isReviewFilePath(file)) { throw new Error('Invalid review file path.'); }
+	const checked = new Set(review.reviewedFiles ?? []);
+	if (snapshot) { checked.add(file); } else { checked.delete(file); }
+	review.reviewedFiles = [...checked];
+	review.reviewedFileSnapshots = Object.fromEntries(
+		Object.entries({ ...review.reviewedFileSnapshots, ...(snapshot ? { [file]: snapshot } : {}) })
+			.filter(([key]) => checked.has(key)),
+	);
+}
+
+export function clearLegacyReviewedFiles(review: Review): number {
+	// ASSUMPTION: a path without a valid snapshot cannot certify any previously reviewed content.
+	const legacy = (review.reviewedFiles ?? []).filter((file) =>
+		!Object.prototype.hasOwnProperty.call(review.reviewedFileSnapshots ?? {}, file));
+	for (const file of legacy) {
+		review.reviewedFiles = review.reviewedFiles?.filter((key) => key !== file);
+	}
+	review.reviewedFileSnapshots = Object.fromEntries(
+		Object.entries(review.reviewedFileSnapshots ?? {}).filter(([file]) => review.reviewedFiles?.includes(file)),
+	);
+	return legacy.length;
 }
 
 /**
@@ -270,6 +343,7 @@ export function parseReview(text: string, sourceFile: string): Review | undefine
 		reviewedFiles: Array.isArray(data.reviewedFiles)
 			? data.reviewedFiles.filter((f): f is string => typeof f === 'string')
 			: [],
+		reviewedFileSnapshots: parseReviewedSnapshots(data.reviewedFileSnapshots),
 		seqCounter: typeof data.seqCounter === 'number' ? data.seqCounter : undefined,
 		sourceFile,
 	};

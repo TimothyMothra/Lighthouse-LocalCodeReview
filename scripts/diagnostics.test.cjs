@@ -449,6 +449,7 @@ test('early activation exposes comments without Git; first pane requests share l
 		'./commentController': { SearchlightCommentController: Comments },
 		'./tagCompletion': { registerTagCompletion: disposable },
 		'./reviewStore': {}, './reviewModel': {},
+		'./reviewedFiles': loadCompiled('reviewedFiles', { vscode, './reviewStore': {}, './git': {} }),
 		'./statusBar': { ReviewStatusBar: StatusBar },
 		'./gitApi': { onRepoStateChanged: async () => undefined },
 		'./git': { getRepoRoot: () => { rootQueries++; return root; }, runGitQuery: async () => '.git' },

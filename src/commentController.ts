@@ -491,15 +491,12 @@ export class SearchlightCommentController implements vscode.Disposable {
 
 		const binding = this.bindings.get(reply.thread);
 		if (binding) {
-			const review = await store.loadReview(vscode.Uri.file(binding.reviewFile));
-			if (!review) {
-				return;
-			}
-			store.addReply(review, binding.threadId, undefined, body, author, tags);
-			if (tags.length > 0) {
-				store.addThreadTags(review, binding.threadId, tags);
-			}
-			await store.saveReview(review);
+			await store.updateReview(binding.reviewFile, (review) => {
+				if (!store.addReply(review, binding.threadId, undefined, body, author, tags)) {
+					throw new Error('The thread is no longer available. Refresh before replying.');
+				}
+				if (tags.length > 0) { store.addThreadTags(review, binding.threadId, tags); }
+			});
 			recordUsage('discussion.replied', { tagged: tags.length > 0 });
 		} else {
 			await this.createNewThread(reply, body, author, tags);
@@ -544,18 +541,6 @@ export class SearchlightCommentController implements vscode.Disposable {
 		const range = reply.thread.range;
 		const startLine = range ? range.start.line + 1 : 1;
 		const endLine = range ? range.end.line + 1 : 1;
-		// Compute seq against the authoritative on-disk review so a transiently-emptied
-		// active.review (watcher-triggered resolve() racing a mid-flight write) can't reset
-		// the #NN counter and collide (the #01-reused bug).
-		let target = review;
-		if (review.sourceFile) {
-			const fresh = await store.loadReview(vscode.Uri.file(review.sourceFile));
-			if (fresh) {
-				fresh.sourceFile = review.sourceFile;
-				if (!fresh.reviewedFiles) { fresh.reviewedFiles = []; }
-				target = fresh;
-			}
-		}
 		// Capture the trimmed text of the anchored line so uncommitted-file threads can be
 		// relocated when the working tree drifts (uc-5). Best-effort: never block thread creation.
 		let anchorText: string | undefined;
@@ -571,8 +556,10 @@ export class SearchlightCommentController implements vscode.Disposable {
 				// Non-file scheme or unreadable document: leave anchorText undefined.
 			}
 		}
-		store.addThread(target, rel, startLine, endLine, body, author, tags, anchorText);
-		await store.saveReview(target);
+		// ASSUMPTION: the shared queue must read the latest seq and checklist before adding a thread.
+		const { review: target } = await store.updateReview(review.sourceFile, (fresh) => {
+			store.addThread(fresh, rel, startLine, endLine, body, author, tags, anchorText);
+		}, { seed: review.threads.length === 0 && !review.reviewedFiles?.length ? review : undefined });
 		recordUsage('discussion.created', { tagged: tags.length > 0 });
 		// Keep the active in-memory review authoritative post-write so the NEXT thread's seq
 		// is also computed from a correct set.
@@ -627,13 +614,13 @@ export class SearchlightCommentController implements vscode.Disposable {
 		threadId: string,
 		state: 'resolved' | 'unresolved',
 	): Promise<void> {
-		const review = await store.loadReview(vscode.Uri.file(reviewFile));
-		if (!review) {
-			return;
-		}
-		const previous = review.threads.find((thread) => thread.id === threadId)?.state;
-		store.setThreadState(review, threadId, state);
-		await store.saveReview(review);
+		const { value: previous } = await store.updateReview(reviewFile, (review) => {
+			const previous = review.threads.find((thread) => thread.id === threadId)?.state;
+			if (!store.setThreadState(review, threadId, state)) {
+				throw new Error('The thread is no longer available. Refresh before changing its state.');
+			}
+			return previous;
+		});
 		if (previous && previous !== state) {
 			recordUsage(state === 'resolved' ? 'discussion.resolved' : 'discussion.reopened');
 		}

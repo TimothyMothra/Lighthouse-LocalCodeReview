@@ -30,6 +30,12 @@ Changed Files initially, and hides resolved threads. Saved VS Code pane layouts 
 Show Resolved choices are preserved. The all-changes diff command remains available in the Command
 Palette, but is no longer a Changed Files toolbar button.
 
+Changed Files checkmarks certify the complete **saved** file change against the effective baseline.
+Saved edits or changed baseline content automatically uncheck affected files; staging/committing
+identical content preserves checks. Unsaved editors disable the entire checkbox and show an
+**Unsaved** explanation. Older checks without content fingerprints are cleared once when their
+review is first used; discussions are preserved. Validation is event-driven, not periodic hashing.
+
 Use **New Thread** in Threads for review-wide messages without a code location.
 **Read** opens a formatted discussion page with replies and explicit Copilot controls, while
 ordinary clicks on code-linked discussions still navigate to code.
