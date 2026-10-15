@@ -131,21 +131,31 @@ is needed, and review them before sharing.
 
 | Question | Signal |
 |---|---|
-| Why did validation run? | `reviewed.reconcile`, `reviewed.sourceChanged` and `reviewed.queued`: trigger, source-event version, forced hashing, queue size and coalescing |
+| Why did validation run? | `reviewed.reconcile`, `reviewed.sourceChanged` and `reviewed.queued`: trigger, source-event version, forced hashing, queue size, coalescing and scheduled `delayMs`/`maxWaitMs` |
 | Why is the checkbox disabled? | `reviewed.dirty` and `reviewed.actionRequested`: dirty/pending flags and whether the action targets the current comparison; the pane also shows its explanation |
 | Are source-file watches installed? | `reviewed.watches`: watched directory/path counts; watch failures are labeled `stage: watch` |
 | What was hashed or reused? | `reviewed.treeCache`, `reviewed.savedCache`, `reviewed.blobCache`; `reviewed.savedRead` gives type and byte count, never bytes or hashes |
+| Was persisted Git metadata reused? | `reviewed.metadataCacheLoad` / `reviewed.metadataCacheLoaded`: load timing and hit/missing/repository-changed outcome; `reviewed.treeCache` shows remaining requested-path misses |
+| Did cache storage fail or evict data? | `reviewed.metadataCacheWrite` / `reviewed.metadataCacheWritten` report timing/bytes; `reviewed.metadataCacheError` gives load/write/cleanup stage and safe error type/code; `reviewed.metadataCacheEvicted` explains commit/byte limits |
 | Was hashing or saving slow? | `reviewed.snapshot`, `reviewed.savedHash`, `reviewed.prepare`, `reviewed.persist` and `reviewed.action` spans; child spans correlate to the initiating action/file |
 | Why was a check cleared or kept? | `reviewed.compared`, `reviewed.invalidated`, `reviewed.kept`: left/right changes and kind/mode changes; invalidation is logged only after persistence |
 | Did newer work supersede the result? | `reviewed.overtaken` and `reviewed.validationSkipped`, including `newerCheck` and `uncheckedOrLegacy` |
 | Were legacy checkmarks reset? | `reviewed.legacyCleared`: count; discussions are not removed |
-| Did a pass finish or stall? | `reviewed.passStarted` / `reviewed.passFinished`: pass ID, elapsed duration, kept/invalidated/failed/discarded counts and remaining queue; pending spans reveal outstanding I/O |
+| Did a pass finish or stall? | `reviewed.passStarted` / `reviewed.passFinished`: pass ID, `oldestQueuedMs`, elapsed duration, kept/invalidated/failed/discarded counts and remaining queue; pending spans reveal outstanding I/O |
 | What failed? | `reviewed.failed` / `reviewed.actionFailed`: stage, error type/code and correlation IDs; local Output/notification carries the human-readable error |
 
 To reproduce, check a saved file, edit and save it, and export the report after it settles (or during
 a stall). Include whether you changed the baseline, staged/committed, used an external editor,
 or had unsaved edits. Diagnostics do not add file reads or Git queries, and disabling them does
 not change invalidation behavior. Exports retain the last 10,000 records, so capture near the event.
+
+For a metadata-cache evaluation, check a file once, allow the cache write to settle, then reload
+VS Code and revisit the same comparison/commits. A disk load hit plus tree-cache hits should avoid
+those Git tree lookups, while saved-byte validation still runs and mutable configuration remains
+session-local. New paths or commits can miss. The cache is `metadata-cache.json` beside the review's
+`comments.json`; deleting it and reloading restores cold lookup behavior without deleting review
+data. Cache I/O is lazy, not a new startup preloader. Tracking/ignoring this branch-local file is
+the workspace owner's responsibility.
 
 ## Limits and overhead
 

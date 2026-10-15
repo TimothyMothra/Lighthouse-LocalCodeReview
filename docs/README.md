@@ -36,6 +36,10 @@ identical content preserves checks. Unsaved editors disable the entire checkbox 
 **Unsaved** explanation. Older checks without content fingerprints are cleared once when their
 review is first used; discussions are preserved. Validation is event-driven, not periodic hashing.
 
+Immutable Git metadata is cached lazily in that comparison's `metadata-cache.json`, beside
+`comments.json`, so later sessions can reuse commit/path lookups. Saved bytes are still verified.
+The cache is disposable; tracking/ignoring it is your responsibility. No preloading is added.
+
 Use **New Thread** in Threads for review-wide messages without a code location.
 **Read** opens a formatted discussion page with replies and explicit Copilot controls, while
 ordinary clicks on code-linked discussions still navigate to code.

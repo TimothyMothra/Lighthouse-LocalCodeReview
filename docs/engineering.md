@@ -23,6 +23,7 @@ all of `node_modules` from the VSIX.
 | `scripts/deploy-local.ps1` | Package + sideload into the host VS Code |
 | `scripts/comparison.test.cjs` | Git ancestry, automatic-target, comparison-state, and webview regression tests |
 | `scripts/reviewed-files.test.cjs` | Saved-content checklist invalidation, dirty-checkbox UX and guarded-write regressions |
+| `scripts/metadata-cache.test.cjs` | Lazy branch-local cache persistence, bounds, isolation and atomic-write/fallback regressions |
 | `docs/` | This knowledge base |
 | `package.json` | Manifest: commands, views, menus, configuration, activation |
 | `tsconfig.json` | TS config (target/module, `out/` outDir) |
@@ -178,6 +179,13 @@ focused suite with `npm run compile` followed by
 `node --test scripts\reviewed-files.test.cjs`; `npm test` includes it automatically.
 Native disabled-control presentation and actual VS Code event delivery still need an isolated
 extension-host smoke check when desktop automation is available.
+
+`metadata-cache.test.cjs` covers reload hits, exact commit/path keys, explicit absence, comparison/
+repository isolation, strict format rejection, four-commit/4-MiB bounds, write cleanup and failure
+fallback, concurrent misses/eviction, and diagnostic privacy. Reader integration verifies that disk
+metadata does not suppress current saved-byte verification or add eager startup lookups.
+`npm test` discovers the suite automatically; no dependency, ignore-file, or Git-state changes
+are required.
 
 ## 9. Known constraints
 

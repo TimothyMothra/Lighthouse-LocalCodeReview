@@ -36,6 +36,7 @@ extension.ts ............ activation, view wiring, command registration, Ask-Cop
   │      └─ commitsWebview.ts .. embedded compact commit-tree CSS + script
   ├─ filesWebview.ts ...... WebviewView: changed files (folder tree, reviewed-file checkboxes)
   ├─ reviewedFiles.ts ..... saved-only fingerprints, checked-path watches and coalesced validation
+  │      └─ gitMetadataCache.ts .. lazy branch-local immutable tree-entry cache, bounded atomic writes
   ├─ conversationsWebview.ts .. WebviewView: threads -> comments, jump to file:line
   ├─ conversationDocument.ts . read-only virtual conversation tabs, independent of code files
   ├─ conversationModel.ts .... full transcript formatting and stable conversation references
@@ -215,11 +216,24 @@ the status bar.
 
 Reviewed-file validation is separate from pane rendering. `ReviewedFiles` records the effective
 baseline's per-file Git identity and the final saved source fingerprint when a file is checked.
-Both cumulative and split views use this whole-file contract. Saves and checked-path filesystem
-events schedule affected files; Git notifications use cheap metadata hints, and selection/reload/
+Both cumulative and split views use this whole-file contract. Saves schedule affected files
+immediately; filesystem events use per-file 100 ms coalescing capped at 250 ms without postponing
+runnable saves or unrelated files. Changes during an in-flight validation retain a trailing pass.
+Git notifications use cheap metadata hints, and selection/reload/
 manual Refresh reconcile the stored checklist. Unchanged immutable endpoints and saved metadata
 reuse cached results; explicit Refresh and source-change events force saved-byte validation.
 There is no polling or hashing on unsaved typing, comment-only refreshes, or ordinary UI redraws.
+
+Immutable Git entries are cached by resolved commit and repo-relative path in the comparison's
+`metadata-cache.json`, beside `comments.json`. Cache instances are scoped by repository and comparison
+folder; their repository key does not expose the absolute root path. Constructor/empty requests do
+no cache I/O. The first necessary lookup loads disk entries lazily and fetches only missing metadata
+from Git. Four commit trees and a 4 MiB disk limit bound the cache; eviction is a cold miss, never a
+review-state change. Resetting working-file state does not discard immutable entries.
+Successful lookups schedule coalesced atomic cache writes without delaying checkbox completion.
+Cache errors are explicit but nonfatal; live-Git errors remain failures. Concurrent metadata misses
+may duplicate queries. This adds neither speculative preloading nor startup file-query coalescing,
+and leaves the broader Git-state/comparison refresh path unchanged.
 
 Dirty-editor transitions send availability-only messages, not full Files data reloads. The entire
 checkbox is disabled with a visible `Unsaved` explanation until save/discard. Changed fingerprints

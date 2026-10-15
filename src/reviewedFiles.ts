@@ -10,6 +10,7 @@ import {
 } from './reviewModel';
 import { updateReview } from './reviewStore';
 import { diagnosticsEnabled, errorFields, event, Fields, now, trace } from './diagnostics';
+import { GitMetadataCache } from './gitMetadataCache';
 
 interface SnapshotContext {
 	root: string; file: string; baseline: string; source: string; working: boolean; key: string;
@@ -46,13 +47,27 @@ function gitSide(entry?: GitFileEntry): ReviewedFileSide {
 }
 
 export class FileSnapshotReader {
-	private readonly trees = new Map<string, Map<string, GitFileEntry | undefined>>();
+	private readonly metadata = new Map<string, GitMetadataCache>();
+	private readonly retiredWrites = new Set<Promise<void>>();
 	private readonly blobs = new Map<string, Promise<string>>();
 	private readonly saved = new Map<string, { side: ReviewedFileSide; sourceKey: string; stamp: string }>();
 	private readonly stamps = new Map<string, string>();
 	private readonly fileModes = new Map<string, Promise<boolean>>();
 
-	reset(): void { this.trees.clear(); this.saved.clear(); this.stamps.clear(); }
+	constructor(private readonly log: (message: string) => void = (message) => console.warn(`[searchlight] ${message}`)) {}
+
+	reset(): void { this.saved.clear(); this.stamps.clear(); }
+	async flushMetadata(): Promise<void> {
+		await Promise.all([...this.metadata.values()].map((cache) => cache.flush()).concat([...this.retiredWrites]));
+	}
+	dispose(): void { for (const cache of this.metadata.values()) { this.retire(cache); } }
+
+	private retire(cache: GitMetadataCache): void {
+		cache.dispose();
+		const pending = cache.flush();
+		this.retiredWrites.add(pending);
+		void pending.then(() => this.retiredWrites.delete(pending));
+	}
 	refreshConfiguration(): void { this.fileModes.clear(); }
 	forget(root: string, file: string): void {
 		const absolute = reviewFileAbsolute(root, file);
@@ -71,20 +86,20 @@ export class FileSnapshotReader {
 		return this.saved.get(absolute)?.stamp !== await this.stamp(absolute);
 	}
 
-	private async entries(root: string, commit: string, files: string[]): Promise<Map<string, GitFileEntry | undefined>> {
-		const key = JSON.stringify([root, commit]);
-		let entries = this.trees.get(key);
-		if (!entries) {
-			if (this.trees.size >= 4) { this.trees.delete(this.trees.keys().next().value!); }
-			entries = new Map(); this.trees.set(key, entries);
+	private entries(context: SnapshotContext, commit: string, files: string[]): Promise<Map<string, GitFileEntry | undefined>> {
+		if (!files.length) { return Promise.resolve(new Map()); }
+		const cacheFile = path.join(path.dirname(context.file), 'metadata-cache.json');
+		const key = JSON.stringify([fileKey(context.root), fileKey(cacheFile)]);
+		let cache = this.metadata.get(key);
+		if (!cache) {
+			if (this.metadata.size >= 4) {
+				const oldest = this.metadata.keys().next().value!;
+				this.retire(this.metadata.get(oldest)!); this.metadata.delete(oldest);
+			}
+			cache = new GitMetadataCache(context.root, cacheFile, readGitFileEntries, this.log);
 		}
-		const needed = files.filter((file) => !entries!.has(file));
-		event('reviewed.treeCache', { outcome: needed.length ? 'miss' : 'hit', fileCount: files.length, missingCount: needed.length });
-		if (needed.length) {
-			const loaded = await readGitFileEntries(root, commit, needed);
-			for (const file of needed) { entries.set(file, loaded.get(file)); }
-		}
-		return entries;
+		this.metadata.delete(key); this.metadata.set(key, cache);
+		return cache.entries(commit, files);
 	}
 
 	private fileMode(root: string): Promise<boolean> {
@@ -156,14 +171,14 @@ export class FileSnapshotReader {
 	}
 
 	async prepare(context: SnapshotContext, files: string[]): Promise<void> {
-		const left = this.entries(context.root, context.baseline, files);
-		await Promise.all([left, context.source === context.baseline ? left : this.entries(context.root, context.source, files)]);
+		const left = this.entries(context, context.baseline, files);
+		await Promise.all([left, context.source === context.baseline ? left : this.entries(context, context.source, files)]);
 	}
 
 	async read(context: SnapshotContext, file: string, forceSaved = true): Promise<ReviewedFileSnapshot> {
-		const leftQuery = this.entries(context.root, context.baseline, [file]);
+		const leftQuery = this.entries(context, context.baseline, [file]);
 		const [leftEntries, rightEntries] = await Promise.all([
-			leftQuery, context.source === context.baseline ? leftQuery : this.entries(context.root, context.source, [file]),
+			leftQuery, context.source === context.baseline ? leftQuery : this.entries(context, context.source, [file]),
 		]);
 		const left = gitSide(leftEntries.get(file)), sourceEntry = rightEntries.get(file);
 		let right: ReviewedFileSide;
@@ -208,13 +223,18 @@ export interface ReviewAvailability {
 }
 
 interface FileState { pending: boolean; signature?: string; error?: string }
+interface QueuedValidation {
+	forceSaved: boolean;
+	firstQueuedAt: number;
+	readyAt: number;
+}
 class OvertakenReview extends Error {}
 
 export class ReviewedFiles implements vscode.Disposable {
-	private readonly reader = new FileSnapshotReader();
+	private readonly reader: FileSnapshotReader;
 	private readonly states = new Map<string, FileState>();
 	private readonly versions = new Map<string, number>();
-	private readonly queued = new Map<string, boolean>();
+	private readonly queued = new Map<string, QueuedValidation>();
 	private readonly watches = new Map<string, vscode.FileSystemWatcher>();
 	private readonly subscriptions: vscode.Disposable[] = [];
 	private readonly dirty = new Set<string>();
@@ -227,6 +247,7 @@ export class ReviewedFiles implements vscode.Disposable {
 	private nextPassId = 0;
 	private adoptedKey = '';
 	private timer?: NodeJS.Timeout;
+	private timerAt?: number;
 	private running = false;
 	private disposed = false;
 
@@ -235,6 +256,7 @@ export class ReviewedFiles implements vscode.Disposable {
 		private readonly changed: () => void,
 		private readonly log: (message: string) => void,
 	) {
+		this.reader = new FileSnapshotReader(log);
 		for (const document of vscode.workspace.textDocuments ?? []) {
 			if (document.uri.scheme === 'file' && document.isDirty) { this.dirty.add(fileKey(document.uri.fsPath)); }
 		}
@@ -326,6 +348,7 @@ export class ReviewedFiles implements vscode.Disposable {
 			this.comparisonGeneration++; this.fileIds.clear(); this.outputMappings.clear();
 		}
 		const checked = this.getActive()?.review?.reviewedFiles ?? [];
+		const reconcileAt = now() + 250;
 		event('reviewed.reconcile', {
 			comparisonGeneration: this.comparisonGeneration, trigger: this.trigger(reason),
 			moved, working: context.working, checkedCount: checked.length,
@@ -336,11 +359,11 @@ export class ReviewedFiles implements vscode.Disposable {
 			}
 		}
 		for (const file of checked) {
-			if (!isReviewFilePath(file)) { this.enqueue(file, false, 'legacy'); continue; }
+			if (!isReviewFilePath(file)) { this.enqueue(file, false, 'legacy', reconcileAt); continue; }
 			const snapshot = this.getActive()?.review?.reviewedFileSnapshots?.[file];
 			const signature = snapshot && JSON.stringify(snapshot);
 			if (moved || reason.startsWith('manual-') || this.states.get(file)?.signature !== signature || !signature) {
-				this.enqueue(file, !moved || reason === 'startup', this.trigger(reason));
+				this.enqueue(file, !moved || reason === 'startup', this.trigger(reason), reconcileAt);
 			}
 		}
 		this.syncWatches(context);
@@ -368,6 +391,8 @@ export class ReviewedFiles implements vscode.Disposable {
 
 	private clear(): void {
 		this.adoptedKey = ''; this.states.clear(); this.queued.clear(); this.reader.reset();
+		if (this.timer) { clearTimeout(this.timer); }
+		this.timer = undefined; this.timerAt = undefined;
 		this.watchedPaths.clear();
 		this.fileIds.clear(); this.outputMappings.clear();
 		for (const watch of this.watches.values()) { watch.dispose(); } this.watches.clear();
@@ -420,16 +445,38 @@ export class ReviewedFiles implements vscode.Disposable {
 		if (!checking) { this.enqueue(file, true, trigger); }
 	}
 
-	private enqueue(file: string, force: boolean, trigger: string): void {
+	private enqueue(file: string, force: boolean, trigger: string, reconcileAt?: number): void {
+		const at = now(), pending = this.queued.get(file);
+		const firstQueuedAt = pending?.firstQueuedAt ?? at;
+		const filesystem = ['file-change', 'file-create', 'file-delete', 'git-hint'].includes(trigger);
+		// ASSUMPTION: an explicit save is complete; only filesystem bursts need a quiet window.
+		let readyAt = trigger === 'save' ? at : filesystem ? Math.min(at + 100, firstQueuedAt + 250) : reconcileAt ?? at + 250;
+		if (pending && (pending.readyAt <= at || !filesystem)) { readyAt = Math.min(readyAt, pending.readyAt); }
 		event('reviewed.queued', {
 			...this.fileFields(file), trigger, forceSaved: force, coalesced: this.queued.has(file),
 			passRunning: this.running, queuedCount: this.queued.size + (this.queued.has(file) ? 0 : 1),
+			delayMs: Math.max(0, readyAt - at), maxWaitMs: filesystem ? 250 : undefined,
 		});
-		this.queued.set(file, force || !!this.queued.get(file));
+		this.queued.set(file, { forceSaved: force || !!pending?.forceSaved, firstQueuedAt, readyAt });
 		this.states.set(file, { ...this.states.get(file), pending: true, error: undefined });
-		if (this.timer) { clearTimeout(this.timer); }
-		this.timer = setTimeout(() => { this.timer = undefined; void this.drain(); }, 250);
+		this.schedule(readyAt);
 		this.changed();
+	}
+
+	private schedule(nextReadyAt?: number): void {
+		if (this.disposed || this.running || !this.queued.size) { return; }
+		let readyAt = nextReadyAt ?? Infinity;
+		if (nextReadyAt === undefined) {
+			for (const entry of this.queued.values()) { readyAt = Math.min(readyAt, entry.readyAt); }
+		}
+		// An earlier wake-up may find a postponed filesystem burst; it will reschedule without I/O.
+		if (this.timer && this.timerAt !== undefined && this.timerAt <= readyAt) { return; }
+		if (this.timer) { clearTimeout(this.timer); }
+		this.timerAt = readyAt;
+		this.timer = setTimeout(() => {
+			this.timer = undefined; this.timerAt = undefined;
+			void this.drain();
+		}, Math.max(0, Math.ceil(readyAt - now())));
 	}
 
 	private ensureCurrent(context: SnapshotContext, file: string, version: number): void {
@@ -452,12 +499,18 @@ export class ReviewedFiles implements vscode.Disposable {
 			while (this.queued.size && !this.disposed) {
 				const context = this.context();
 				if (!context || context.key !== this.adoptedKey) { this.queued.clear(); break; }
-				const work = [...this.queued]; this.queued.clear();
+				const ready = now();
+				const work = [...this.queued].filter(([, entry]) => entry.readyAt <= ready);
+				if (!work.length) { break; }
+				for (const [file] of work) { this.queued.delete(file); }
 				const fields = { comparisonGeneration: this.comparisonGeneration, passId: ++this.nextPassId };
 				const started = now();
 				const counts = { kept: 0, invalidated: 0, failed: 0, discarded: 0, legacyCleared: 0 };
 				let stage = 'migration';
-				event('reviewed.passStarted', { ...fields, fileCount: work.length, forcedCount: work.filter(([, force]) => force).length });
+				event('reviewed.passStarted', {
+					...fields, fileCount: work.length, forcedCount: work.filter(([, entry]) => entry.forceSaved).length,
+					oldestQueuedMs: work.reduce((oldest, [, entry]) => Math.max(oldest, started - entry.firstQueuedAt), 0),
+				});
 				try {
 					const active = this.getActive();
 					if (active?.review?.reviewedFiles?.some((file) => !active.review?.reviewedFileSnapshots?.[file])) {
@@ -474,7 +527,8 @@ export class ReviewedFiles implements vscode.Disposable {
 					const files = work.map(([file]) => file).filter((file) => this.getActive()?.review?.reviewedFiles?.includes(file));
 					stage = 'prepare';
 					await trace('reviewed.prepare', () => this.reader.prepare(context, files), { ...fields, fileCount: files.length });
-					for (const [file, force] of work) {
+					for (const [file, entry] of work) {
+						const force = entry.forceSaved;
 						if (this.key !== context.key) { throw new OvertakenReview(); }
 						const fileFields = { ...this.fileFields(file), passId: fields.passId };
 						const expected = this.getActive()?.review?.reviewedFileSnapshots?.[file];
@@ -553,7 +607,7 @@ export class ReviewedFiles implements vscode.Disposable {
 				}
 				this.changed();
 			}
-		} finally { this.running = false; }
+		} finally { this.running = false; this.schedule(); }
 	}
 
 	async setReviewed(file: string, checked: boolean, key: string): Promise<void> {
@@ -619,6 +673,7 @@ export class ReviewedFiles implements vscode.Disposable {
 		this.disposed = true;
 		if (this.timer) { clearTimeout(this.timer); }
 		for (const subscription of this.subscriptions) { subscription.dispose(); }
+		this.reader.dispose();
 		this.clear();
 	}
 }

@@ -18,19 +18,28 @@ const snapshot = (left = A, right = 'saved') => ({
 	right: { kind: 'file', hash: sha(right), mode: '100644' },
 });
 
-function load(name, mocks) {
+function load(name, mocks, bindings = {}) {
 	const filename = path.resolve(__dirname, '..', 'out', `${name}.js`);
 	const module = { exports: {} }, nativeRequire = createRequire(filename);
-	vm.runInThisContext(wrap(require('node:fs').readFileSync(filename, 'utf8')), { filename })(
+	const source = wrap(require('node:fs').readFileSync(filename, 'utf8'));
+	const factory = vm.runInThisContext(`(function(${Object.keys(bindings).join(',')}) { return ${source}; })`, { filename })(...Object.values(bindings));
+	factory(
 		module.exports, (id) => Object.hasOwn(mocks, id) ? mocks[id] : nativeRequire(id),
 		module, filename, path.dirname(filename),
 	);
 	return module.exports;
 }
 
-async function fixture(t, initial = {}) {
+async function fixture(t, initial = {}, timing) {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'searchlight-reviewed-'));
-	t.after(() => fs.rm(root, { recursive: true, force: true }));
+	let coordinator;
+	const readers = [];
+	t.after(async () => {
+		coordinator?.dispose();
+		for (const reader of readers) { reader.dispose(); }
+		await Promise.all([coordinator?.reader.flushMetadata(), ...readers.map((reader) => reader.flushMetadata())]);
+		await fs.rm(root, { recursive: true, force: true });
+	});
 	const uri = (fsPath) => ({ fsPath, scheme: 'file', toString: () => `file:${fsPath}` });
 	const handlers = { save: new Set(), change: new Set(), close: new Set() }, watchers = new Set();
 	const warnings = [], info = [], logs = [], writes = [];
@@ -70,7 +79,10 @@ async function fixture(t, initial = {}) {
 		hashGitBlob: async (_root, oid) => { calls.blobs++; return sha(oid === B ? 'saved' : 'baseline'); },
 	};
 	const store = load('reviewStore', { vscode });
-	const exports = load('reviewedFiles', { vscode, './reviewStore': store, './git': gitMock });
+	const exports = load('reviewedFiles', {
+		vscode, './reviewStore': store, './git': gitMock,
+		...(timing ? { './diagnostics': { ...diagnostics, now: timing.now } } : {}),
+	}, timing ? { setTimeout: timing.setTimeout, clearTimeout: timing.clearTimeout } : {});
 	const review = { ...store.emptyReview(root, 'feature', 'main', B, A), ...initial };
 	const active = {
 		repoRootFsPath: root, sourceFile: review.sourceFile, baselineCommit: A, compareCommit: B, compareIsHead: true, review,
@@ -83,21 +95,170 @@ async function fixture(t, initial = {}) {
 	if (initial.persisted) {
 		await store.saveReview(review); writes.length = 0;
 	}
-	const coordinator = new exports.ReviewedFiles(() => active, () => calls.availability++, (message) => logs.push(message));
+	coordinator = new exports.ReviewedFiles(() => active, () => calls.availability++, (message) => logs.push(message));
 	const hashSaved = coordinator.reader.savedSide.bind(coordinator.reader);
 	coordinator.reader.savedSide = async (...args) => { calls.hashes++; return hashSaved(...args); };
-	t.after(() => coordinator.dispose());
 	coordinator.reconcile('startup');
 	async function flush() {
-		if (coordinator.timer) { clearTimeout(coordinator.timer); coordinator.timer = undefined; }
-		await coordinator.drain();
+		do {
+			if (coordinator.timer) { clearTimeout(coordinator.timer); coordinator.timer = undefined; }
+			for (const entry of coordinator.queued.values()) { entry.readyAt = 0; }
+			await coordinator.drain();
+		} while (coordinator.queued.size && !coordinator.running);
 	}
 	const document = { uri: uri(path.join(root, 'file.ts')), isDirty: false };
 	function dirty(value) { document.isDirty = value; for (const handler of handlers.change) { handler({ document }); } }
 	function save() { document.isDirty = false; for (const handler of handlers.save) { handler(document); } }
 	function external(file = 'file.ts') { for (const watcher of [...watchers]) { watcher.fire(uri(path.join(root, file))); } }
-	return { root, active, coordinator, exports, store, vscode, handlers, watchers, warnings, info, logs, writes, calls, tables, uri, flush, dirty, save, external, document };
+	const newReader = () => {
+		const reader = new exports.FileSnapshotReader((message) => logs.push(message));
+		readers.push(reader); return reader;
+	};
+	return { root, active, coordinator, exports, store, vscode, handlers, watchers, warnings, info, logs, writes, calls, tables, uri, flush, dirty, save, external, document, newReader };
 }
+
+function schedulerClock() {
+	let at = 1000, next = 0;
+	const timers = new Map();
+	return {
+		now: () => at,
+		advance: (ms) => { at += ms; },
+		setTimeout: (callback, delay) => { const id = ++next; timers.set(id, { callback, delay }); return id; },
+		clearTimeout: (id) => timers.delete(id),
+		timers,
+	};
+}
+
+test('explicit saves are immediately runnable and later filesystem events cannot postpone them', async (t) => {
+	const clock = schedulerClock(), f = await fixture(t, {}, clock);
+	await f.coordinator.setReviewed('file.ts', true, f.coordinator.key);
+	const hashes = f.calls.hashes;
+	await fs.writeFile(path.join(f.root, 'file.ts'), 'changed');
+	f.save();
+	const readyAt = f.coordinator.queued.get('file.ts').readyAt;
+	assert.equal(readyAt, clock.now());
+	assert.equal(clock.timers.get(f.coordinator.timer).delay, 0);
+	clock.advance(78); f.external();
+	assert.equal(f.coordinator.queued.get('file.ts').readyAt, readyAt);
+	const drain = f.coordinator.drain.bind(f.coordinator);
+	let completed;
+	f.coordinator.drain = () => { completed = drain(); return completed; };
+	clock.timers.get(f.coordinator.timer).callback();
+	await completed;
+	assert.equal(f.calls.hashes, hashes + 1);
+	assert.deepEqual(f.active.review.reviewedFiles, []);
+	clock.advance(100); f.external();
+	assert.equal(f.coordinator.queued.size, 0);
+});
+
+test('filesystem-only validation waits for its 100 ms quiet window but cannot be postponed beyond 250 ms', async (t) => {
+	const clock = schedulerClock(), f = await fixture(t, {}, clock);
+	await f.coordinator.setReviewed('file.ts', true, f.coordinator.key);
+	const hashes = f.calls.hashes;
+	f.external();
+	const first = clock.now();
+	assert.equal(f.coordinator.queued.get('file.ts').readyAt, first + 100);
+	clock.advance(80); f.external();
+	assert.equal(f.coordinator.queued.get('file.ts').readyAt, first + 180);
+	clock.advance(80); f.external();
+	assert.equal(f.coordinator.queued.get('file.ts').readyAt, first + 250);
+	clock.advance(80); f.external();
+	assert.equal(f.coordinator.queued.get('file.ts').readyAt, first + 250);
+	await f.coordinator.drain();
+	assert.equal(f.calls.hashes, hashes);
+	clock.advance(10); await f.coordinator.drain();
+	assert.equal(f.calls.hashes, hashes + 1);
+	assert.deepEqual(f.active.review.reviewedFiles, ['file.ts']);
+});
+
+test('filesystem bursts for another checked file cannot hold a save or reset an unrelated deadline', async (t) => {
+	const clock = schedulerClock(), f = await fixture(t, {}, clock);
+	await f.coordinator.setReviewed('file.ts', true, f.coordinator.key);
+	f.tables.get(A).set('other.ts', entry()); f.tables.get(B).set('other.ts', entry(B));
+	await fs.writeFile(path.join(f.root, 'other.ts'), 'saved');
+	await f.coordinator.setReviewed('other.ts', true, f.coordinator.key);
+	const hashes = f.calls.hashes;
+	f.external('other.ts');
+	const otherReady = f.coordinator.queued.get('other.ts').readyAt;
+	clock.advance(50); f.save();
+	assert.equal(f.coordinator.timerAt, clock.now());
+	assert.equal(f.coordinator.queued.get('other.ts').readyAt, otherReady);
+	await f.coordinator.drain();
+	assert.equal(f.calls.hashes, hashes + 1);
+	assert.equal(f.coordinator.queued.has('file.ts'), false);
+	assert.equal(f.coordinator.queued.has('other.ts'), true);
+	clock.advance(50); await f.coordinator.drain();
+	assert.equal(f.calls.hashes, hashes + 2);
+});
+
+test('startup reconciliation retains its shared 250 ms deadline and starts no early fingerprint work', async (t) => {
+	const clock = schedulerClock(), clockNow = clock.now;
+	clock.now = () => { const value = clockNow(); clock.advance(1); return value; };
+	const f = await fixture(t, {
+		persisted: true, reviewedFiles: ['file.ts', 'missing.ts'], reviewedFileSnapshots: {
+			'file.ts': snapshot(), 'missing.ts': { version: 1, left: { kind: 'absent' }, right: { kind: 'absent' } },
+		},
+	}, clock);
+	assert.equal(f.coordinator.queued.get('file.ts').readyAt, 1250);
+	assert.equal(f.coordinator.queued.get('missing.ts').readyAt, 1250);
+	await f.coordinator.drain();
+	assert.equal(f.calls.hashes, 0);
+	assert.equal(f.calls.trees, 0);
+	clock.advance(250); await f.coordinator.drain();
+	assert.equal(f.calls.hashes, 2);
+	assert.equal(f.calls.trees, 2);
+});
+
+test('fresh readers reuse branch-local disk metadata but still hash current saved bytes and miss on a new commit', async (t) => {
+	const f = await fixture(t);
+	await f.coordinator.setReviewed('file.ts', true, f.coordinator.key);
+	await f.coordinator.reader.flushMetadata();
+	const cacheFile = path.join(path.dirname(f.active.sourceFile), 'metadata-cache.json');
+	assert.equal((await fs.stat(cacheFile)).isFile(), true);
+	const first = f.active.review.reviewedFileSnapshots['file.ts'], trees = f.calls.trees;
+	await fs.writeFile(path.join(f.root, 'file.ts'), 'changed while closed');
+	const reader = f.newReader(), context = f.coordinator.context();
+	const fresh = await reader.read(context, 'file.ts');
+	assert.equal(f.calls.trees, trees);
+	assert.equal(fresh.right.hash, sha('changed while closed'));
+	assert.equal(model.sameReviewedSnapshot(first, fresh), false);
+	f.tables.set(C, new Map([['file.ts', entry(C)]]));
+	await reader.read({ ...context, baseline: C }, 'file.ts');
+	assert.equal(f.calls.trees, trees + 1);
+});
+
+test('reader reset reuses immutable metadata while a different comparison folder has its own cache', async (t) => {
+	const f = await fixture(t), reader = f.newReader(), context = f.coordinator.context();
+	await reader.read(context, 'file.ts'); await reader.flushMetadata();
+	const trees = f.calls.trees;
+	reader.reset();
+	await reader.read(context, 'file.ts');
+	assert.equal(f.calls.trees, trees);
+	const other = { ...context, file: path.join(f.root, '.vscode', 'searchlight-reviews', 'other_main', 'comments.json') };
+	await reader.read(other, 'file.ts'); await reader.flushMetadata();
+	assert.equal(f.calls.trees, trees + 2);
+	assert.equal((await fs.stat(path.join(path.dirname(other.file), 'metadata-cache.json'))).isFile(), true);
+});
+
+test('no metadata file is loaded or created by a reader constructor or an empty preparation', async (t) => {
+	const f = await fixture(t), reader = f.newReader();
+	await reader.prepare(f.coordinator.context(), []);
+	assert.equal(reader.metadata.size, 0);
+	assert.equal(f.calls.trees, 0);
+	await assert.rejects(fs.stat(path.join(path.dirname(f.active.sourceFile), 'metadata-cache.json')), { code: 'ENOENT' });
+});
+
+test('a corrupt disk cache falls back to Git rather than changing a valid reviewed checkpoint', async (t) => {
+	const f = await fixture(t);
+	await f.coordinator.setReviewed('file.ts', true, f.coordinator.key);
+	await f.coordinator.reader.flushMetadata();
+	const expected = f.active.review.reviewedFileSnapshots['file.ts'], count = f.calls.trees;
+	await fs.writeFile(path.join(path.dirname(f.active.sourceFile), 'metadata-cache.json'), 'invalid cache');
+	const actual = await f.newReader().read(f.coordinator.context(), 'file.ts');
+	assert.ok(model.sameReviewedSnapshot(actual, expected));
+	assert.equal(f.calls.trees, count + 2);
+	assert.ok(f.logs.some((line) => line.includes('Metadata cache load failed')));
+});
 
 test('fingerprints round-trip without changing discussions, and malformed snapshots cannot certify legacy checks', async (t) => {
 	const f = await fixture(t);

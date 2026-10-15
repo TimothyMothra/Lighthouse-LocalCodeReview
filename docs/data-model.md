@@ -184,8 +184,10 @@ Working-tree overlays for a different, non-HEAD source cannot certify that sourc
 
 On first use, legacy checks without valid snapshots are cleared and the user is notified;
 comments and thread sequence counters remain intact. Inactive reviews are not bulk migrated.
-Source saves and checked-path filesystem events trigger debounced validation, while Git events
-provide metadata hints. Startup/review selection and explicit Refresh reconcile persisted checks,
+Source saves schedule validation immediately. Checked-path filesystem events use a per-file
+100 ms quiet window, capped at 250 ms, while Git events provide metadata hints. Later notifications
+cannot postpone a runnable save, and changes during validation retain a trailing recheck.
+Startup/review selection and explicit Refresh reconcile persisted checks,
 including hidden/deleted paths. Comment-only/UI refreshes do not launch file-hash scans.
 Changes made and restored before validation, or while inactive, are not an edit history.
 
@@ -194,6 +196,43 @@ observed external edits before writing. This is not an atomic cross-process comp
 Unreadable files, failed Git queries, and write errors are reported as unverified/error states,
 never substituted with empty content. Checking remains a lazy first mutation that creates
 `comments.json`; mere rendering does not.
+
+### Disposable branch-local Git metadata
+
+`metadata-cache.json` lives beside that comparison's `comments.json`. It is independent of
+review content and does not change the v2 review schema:
+
+```jsonc
+{
+  "version": 1,
+  "repository": "<opaque SHA-256 scope key for the normalized repository root>",
+  "commits": [
+    {
+      "commit": "<full resolved commit SHA>",
+      "files": [
+        { "path": "src/app.js", "entry": { "mode": "100644", "type": "blob", "oid": "<Git object ID>" } },
+        { "path": "not-in-this-commit.js", "entry": null }
+      ]
+    }
+  ]
+}
+```
+
+The cache stores only immutable Git tree lookup results, including explicit absence at a particular
+commit. It contains neither source contents, live-file hashes, Git configuration nor reviewed flags.
+Requests first reuse memory/disk entries, then query Git for missing paths. Failed Git queries
+never become cached absence. New readers can reuse the disk cache, but still verify saved bytes.
+
+Loading is lazy on the first nonempty metadata request; construction and ordinary pane rendering
+do not preload it. It retains at most four recently used commit trees and 4 MiB of serialized data.
+Writes are coalesced asynchronously and replace the cache atomically through a uniquely named
+temporary file in the same directory; `comments.json` is never replaced by cache writes.
+
+Missing files are normal cache misses. Invalid, oversized, inaccessible or unwritable cache data
+is diagnosed and bypassed without altering review checkpoints or blocking live Git/memory results.
+Concurrent misses may repeat Git lookups; there is no lookup-deduplication layer. Deleting the
+cache and reloading only makes subsequent lookups cold. Ignore/tracking policy is the workspace
+owner's responsibility; the extension does not edit ignore files or Git state.
 
 ## 9. Helper functions (reviewModel.ts, `vscode`-free)
 
