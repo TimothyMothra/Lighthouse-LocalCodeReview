@@ -50,12 +50,13 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 		private readonly onSelectBase: (branch: string) => void | Promise<void>,
 		private readonly onSelectCompare: (branch: string) => void | Promise<void>,
 		private readonly onPull: (row: Row) => void | Promise<void>,
+		private readonly initializeRepository?: () => Promise<void>,
 	) {}
 
 	/** Kept named `refresh` so the extension's `refreshAll` closure is unchanged. */
 	refresh(reloadBranches = false): void {
 		if (reloadBranches) { this.invalidateBranches(); }
-		void this.postState();
+		void this.postState('refresh-or-action', reloadBranches);
 	}
 
 	/** Native context menus carry the immutable SHA of the selected history row. */
@@ -194,6 +195,12 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 		this.stateVersion++;
 		this.view = webviewView;
 		this.metrics.bind(webviewView);
+		webviewView.onDidDispose(() => {
+			if (this.view === webviewView) {
+				this.view = undefined;
+				this.stateVersion++;
+			}
+		});
 		webviewView.webview.options = { enableScripts: true };
 		webviewView.webview.html = this.html();
 		webviewView.webview.onDidReceiveMessage(async (msg: {
@@ -208,7 +215,7 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 					break;
 				case 'refreshBranches':
 					this.invalidateBranches();
-					await this.postState(msg.type);
+					await this.postState(msg.type, true);
 					break;
 				case 'selectBase':
 					if (typeof msg.branch === 'string' && msg.branch) {
@@ -324,14 +331,36 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 		return { behind: ab.behind, upstream: ab.upstream };
 	}
 
-	private async postState(reason = 'refresh-or-action'): Promise<void> {
+	private async postState(reason = 'refresh-or-action', liveHead = false): Promise<void> {
 		const version = ++this.stateVersion;
-		return this.metrics.build(() => this.buildState(version), reason);
+		return this.metrics.build(() => this.buildState(version, liveHead), reason);
 	}
 
-	private async buildState(version: number): Promise<void> {
-		if (!this.view) {
+	private async buildState(version: number, liveHead: boolean): Promise<void> {
+		const view = this.view;
+		if (!view) {
 			return;
+		}
+		const initialize = this.initializeRepository;
+		if (initialize) {
+			// ASSUMPTION: a visible shell may still have only a placeholder repo root.
+			// Share host initialization before any branch/HEAD query; do not block the shell itself.
+			try {
+				await trace('comparison.repositoryWait', initialize);
+			} catch (error) {
+				if (version === this.stateVersion && this.view === view) {
+					const active = this.getActive();
+					this.metrics.post({
+						type: 'state', branches: [], base: active?.base ?? null, compare: active?.compare ?? null,
+						ready: false, baselineError: `Comparison initialization failed: ${error instanceof Error ? error.message : String(error)}`,
+					});
+				}
+				return;
+			}
+			if (version !== this.stateVersion || this.view !== view) {
+				event('comparison.stateDiscarded', { phase: 'initialization' });
+				return;
+			}
 		}
 		const active = this.getActive();
 		if (!active) {
@@ -340,8 +369,15 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 		}
 		const cwd = active.repoRootFsPath;
 		const comparisonKey = active.comparisonKey;
+		// ASSUMPTION: resolved model HEAD is authoritative for ordinary refreshes. Explicit
+		// branch refreshes still query live HEAD; before resolution, the shared CLI read is used.
 		const [branchRefs, head] = await trace('comparison.branches', () =>
-			Promise.all([this.loadBranches(cwd), gitApi.getHead(cwd)]));
+			Promise.all([
+				this.loadBranches(cwd),
+				!liveHead && active.headCommit
+					? Promise.resolve({ branch: active.headBranch, commit: active.headCommit, detached: !active.headBranch })
+					: gitApi.getHead(cwd),
+			]));
 		const overtaken = () => version !== this.stateVersion || active !== this.getActive() ||
 			cwd !== active.repoRootFsPath || comparisonKey !== active.comparisonKey;
 		if (overtaken()) {
@@ -409,7 +445,6 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    padding: 8px;
     font-family: var(--vscode-font-family);
     font-size: var(--vscode-font-size);
     color: var(--vscode-foreground);
@@ -418,6 +453,20 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
     flex-direction: column;
     overflow: hidden;
   }
+  .comparison-scroll {
+    flex: 1; min-height: 0; overflow: auto; padding: 8px;
+    display: flex; flex-direction: column;
+  }
+  .comparison-scroll:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+  /* ASSUMPTION: reserve the cue's slot so overflow feedback never shifts the commit list. */
+  .overflow-cue {
+    flex: 0 0 20px; padding: 0 8px; border: none; cursor: pointer;
+    background: var(--vscode-sideBar-background); color: var(--vscode-textLink-foreground);
+    font: inherit; font-size: 11px; text-align: left;
+  }
+  .overflow-cue[hidden] { display: block; visibility: hidden; }
+  .overflow-cue:hover { background: var(--vscode-list-hoverBackground); }
+  .overflow-cue:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
   .selectors { flex: 0 0 auto; }
   .field { margin-bottom: 10px; position: relative; }
   .field-label {
@@ -556,6 +605,7 @@ ${COMMITS_CSS}
 </style>
 </head>
 <body>
+  <div class="comparison-scroll" id="comparison-scroll" tabindex="0" role="region" aria-label="Comparison selectors and commits">
   <div class="selectors">
   <div class="field" data-row="base">
     <label class="field-label" for="base-input">Base (target)</label>
@@ -593,10 +643,31 @@ ${COMMITS_CSS}
       </div>
     </div>
   </div>
+  </div>
+  <button class="overflow-cue" id="overflow-cue" type="button" aria-controls="comparison-scroll" hidden>↓ More below</button>
 
 <script>
   const vscode = acquireVsCodeApi();
   ${renderMetricsScript()}
+  const comparisonScroll = document.getElementById('comparison-scroll');
+  const overflowCue = document.getElementById('overflow-cue');
+  function updateOverflowCue() {
+    const below = comparisonScroll.scrollHeight - comparisonScroll.clientHeight - comparisonScroll.scrollTop > 1;
+    overflowCue.hidden = !below && comparisonScroll.scrollTop <= 1;
+    overflowCue.textContent = below ? '↓ More below' : '↑ More above';
+    overflowCue.title = below ? 'Scroll down to more Comparison controls' : 'Scroll up to the Comparison selectors';
+  }
+  comparisonScroll.addEventListener('scroll', updateOverflowCue, { passive: true });
+  overflowCue.addEventListener('click', () => {
+    const below = comparisonScroll.scrollHeight - comparisonScroll.clientHeight - comparisonScroll.scrollTop > 1;
+    comparisonScroll.scrollBy({ top: (below ? 1 : -1) * comparisonScroll.clientHeight });
+  });
+  // ASSUMPTION: VS Code may restore a 120px body; resize observations cover zoom, errors and disclosures without polling.
+  const overflowObserver = new ResizeObserver(updateOverflowCue);
+  overflowObserver.observe(comparisonScroll);
+  overflowObserver.observe(document.querySelector('.selectors'));
+  overflowObserver.observe(document.getElementById('commit-pane'));
+  updateOverflowCue();
   let branches = [];
   let selected = { base: null, compare: null };
   let headBranch = null;

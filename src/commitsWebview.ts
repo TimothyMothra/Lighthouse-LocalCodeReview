@@ -3,8 +3,9 @@
  * from the former Commits pane; native VS Code context menus carry the full SHA to Set as Base.
  */
 export const COMMITS_CSS = `
-.commit-pane { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-.commit-pane.collapsed { flex: 0 0 auto; }
+/* ASSUMPTION: short panes scroll the selectors, toolbar and several commit rows instead of clipping them. */
+.commit-pane { display: flex; flex: 1 0 160px; flex-direction: column; min-height: 160px; }
+.commit-pane.collapsed { flex: 0 0 auto; min-height: 0; }
 .commit-toggle {
 	flex: 0 0 auto; padding: 5px 0; border: none; text-align: left; cursor: pointer;
 	background: transparent; color: var(--vscode-foreground); font: inherit;

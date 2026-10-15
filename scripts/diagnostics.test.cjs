@@ -109,7 +109,7 @@ test('Base action traces cover early feedback and settled content without record
 	const provider = new ComparisonWebviewProvider(() => active, async () => { await wait; }, () => {}, () => {});
 	let receive;
 	provider.postState = async () => { messages.push({ type: 'state' }); };
-	provider.resolveWebviewView({ webview: {
+	provider.resolveWebviewView({ onDidDispose: () => ({ dispose() {} }), webview: {
 		postMessage: (message) => { messages.push(message); return Promise.resolve(true); },
 		onDidReceiveMessage: (handler) => { receive = handler; },
 	} });
@@ -164,14 +164,14 @@ test('pending retention is bounded and disabling logging while a span runs still
 	assert.equal(diagnostics.diagnosticsSnapshot().pending.length, 0);
 });
 
-test('Git spans cover shell and execFile without exporting paths, ref values or subprocess output', async () => {
+test('read-only Git spans use execFile without exporting paths, refs or subprocess output', async () => {
 	const lines = begin();
 	const calls = [];
 	const executor = (shell) => {
 		const fn = () => {};
 		fn[require('node:util').promisify.custom] = async (...args) => {
 			calls.push({ shell, args });
-			if (args[1]?.[0] === 'rev-parse') {
+			if (args[1]?.[0] === 'rev-parse' && args[1].includes('--show-toplevel')) {
 				throw Object.assign(new Error('private-error-output'), { code: 128 });
 			}
 			return { stdout: 'private-command-output', stderr: 'private-stderr' };
@@ -185,6 +185,7 @@ test('Git spans cover shell and execFile without exporting paths, ref values or 
 	assert.equal(await git.runGitQuery('private-workspace-path', ['show', 'private-ref:private-file']), 'private-command-output');
 	assert.equal(await git.getRepoRoot('private-workspace-path'), undefined);
 	assert.equal(calls.length, 3);
+	assert.ok(calls.every((call) => !call.shell));
 	assert.equal(diagnostics.diagnosticsSnapshot().aggregates['git.command'].count, 3);
 	assert.equal(diagnostics.diagnosticsSnapshot().aggregates['git.command'].errors, 1);
 	assert.ok(lines.every((line) => !line.includes('private-')));
@@ -391,20 +392,28 @@ test('webview script separates synchronous DOM time from two-frame opportunity a
 	assert.equal(messages.length, 3);
 });
 
-test('early activation exposes comments without Git; first pane requests share lazy initialization', async () => {
+test('lazy startup stays Git-free before demand, retries cleanly, shares snapshots and retains ref races', async () => {
 	const commands = new Map();
 	const panes = new Map();
 	const noop = () => {};
 	const disposable = () => ({ dispose: noop });
 	const configuration = { get: (_key, fallback) => fallback };
 	const channel = { appendLine: noop, dispose: noop };
-	const watcher = () => ({ onDidCreate: disposable, onDidChange: disposable, onDidDelete: disposable, dispose: noop });
+	const watches = [];
+	const failures = [];
+	const watcher = (pattern) => {
+		const change = emitter();
+		const item = { onDidCreate: disposable, onDidChange: change.event, onDidDelete: disposable,
+			dispose: () => { item.disposed = true; }, disposed: false, change, pattern };
+		watches.push(item);
+		return item;
+	};
 	let exported;
 	let editorPath = '/private-file.ts', editorColumn = 1, tabsChanged;
 	const vscode = {
 		version: 'fixture',
 		Uri: { file: (fsPath) => ({ fsPath }), joinPath: (base, leaf) => ({ fsPath: `${base.fsPath}\\${leaf}` }) },
-		RelativePattern: class {},
+		RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
 		workspace: {
 			isTrusted: true, workspaceFolders: [{ uri: { fsPath: 'fixture-workspace' } }],
 			getConfiguration: () => configuration, onDidChangeConfiguration: disposable,
@@ -428,19 +437,49 @@ test('early activation exposes comments without Git; first pane requests share l
 			registerWebviewViewProvider: (id, provider) => { panes.set(id, provider); return disposable(); },
 			registerWebviewPanelSerializer: disposable,
 			onDidChangeActiveTextEditor: disposable, showSaveDialog: async () => ({ fsPath: 'fixture-export' }),
-			showInformationMessage: noop, showErrorMessage: (message) => assert.fail(message),
+			showInformationMessage: noop, showErrorMessage: (message) => failures.push(message),
 		},
 		commands: { registerCommand: (name, handler) => { commands.set(name, handler); return disposable(); } },
 	};
 	const perf = loadCompiled('perf', { vscode });
 	const metrics = loadCompiled('webviewMetrics', { vscode });
-	class Provider { refresh() {} revealForUri() {} resolveWebviewView() {} }
+	let comparisonRefreshes = 0, fileRefreshes = 0, invalidations = 0;
+	let waitForRepository, releaseDefaults;
+	const defaultsReady = new Promise((resolve) => { releaseDefaults = resolve; });
+	class Provider { refresh() {} revealForUri() {} resolveWebviewView() {} invalidateBranches() { invalidations++; } }
+	class ComparisonProvider extends Provider {
+		constructor(...args) { super(); waitForRepository = args[4]; }
+		refresh() { comparisonRefreshes++; }
+	}
+	class FilesProvider extends Provider { refresh() { fileRefreshes++; } }
 	let commentRenders = 0, rootQueries = 0, replyCalls = 0, conversationOpens = 0;
+	let repoChanged, refsChanged, resolveCalls = 0, snapshotCalls = 0, raceDuringResolve = true;
+	let failDefaultsOnce = true;
+	const snapshots = [];
 	class Comments { render() { commentRenders++; } dispose() {} handleReply() { replyCalls++; } }
 	class StatusBar { update() {} dispose() {} }
 	class Comparison {
-		async computeDefaults() {}
-		async resolve() { this.baselineCommit = 'resolved'; }
+		async computeDefaults(snapshot) {
+			assert.equal(watches.filter((watch) => !watch.disposed).length, 3, 'HEAD/shared-ref watches must precede metadata capture');
+			await defaultsReady;
+			if (failDefaultsOnce) {
+				failDefaultsOnce = false;
+				throw new Error('transient initialization failure');
+			}
+			this.headCommit = 'known';
+			snapshots.push(snapshot);
+			refsChanged('opened');
+			repoChanged('opened');
+		}
+		async resolve(snapshot) {
+			resolveCalls++;
+			snapshots.push(snapshot);
+			this.baselineCommit = 'resolved';
+			if (raceDuringResolve) {
+				raceDuringResolve = false;
+				watches.findLast((watch) => watch.pattern?.pattern === '{HEAD,config.worktree}').change.fire();
+			}
+		}
 	}
 	let release;
 	const root = new Promise((resolve) => { release = resolve; });
@@ -451,11 +490,22 @@ test('early activation exposes comments without Git; first pane requests share l
 		'./reviewStore': {}, './reviewModel': {},
 		'./reviewedFiles': loadCompiled('reviewedFiles', { vscode, './reviewStore': {}, './git': {} }),
 		'./statusBar': { ReviewStatusBar: StatusBar },
-		'./gitApi': { onRepoStateChanged: async () => undefined },
-		'./git': { getRepoRoot: () => { rootQueries++; return root; }, runGitQuery: async () => '.git' },
+		'./gitApi': {
+			getGitApi: async () => undefined,
+			onRepoStateChanged: async (_cwd, handler, refHandler) => {
+				repoChanged = handler;
+				refsChanged = refHandler;
+				return undefined;
+			},
+			getHead: async () => ({ branch: 'feature', commit: 'known', detached: false }),
+		},
+		'./git': {
+			getRepositoryInfo: () => { rootQueries++; return root; },
+			readComparisonRefs: async () => { snapshotCalls++; return 'captured refs'; },
+		},
 		'./activeComparison': { ActiveComparison: Comparison },
-		'./comparisonView': { ComparisonWebviewProvider: Provider },
-		'./filesWebview': { FilesWebviewProvider: Provider, syncUncommittedContext: noop, isUncommittedHidden: () => false },
+		'./comparisonView': { ComparisonWebviewProvider: ComparisonProvider },
+		'./filesWebview': { FilesWebviewProvider: FilesProvider, syncUncommittedContext: noop, isUncommittedHidden: () => false },
 		'./commitsWebview': { CommitsWebviewProvider: Provider },
 		'./conversationsWebview': { ConversationsWebviewProvider: Provider, syncResolvedContext: noop, isResolvedHidden: () => false },
 		'./reviewDiff': { DIFF_SCHEME: 'fixture', ReviewDiffContentProvider: class {} },
@@ -508,14 +558,53 @@ test('early activation exposes comments without Git; first pane requests share l
 		await commands.get('searchlight.exportStartupDiagnostics')();
 		assert.equal(exported.trace.schemaVersion, 1);
 		assert.ok(exported.trace.pending.some((span) => span.name === 'startup.repoRoot'));
-		release('fixture-workspace');
-		await Promise.all([firstPane, secondPane]);
+		release({ root: 'fixture-workspace', headPath: path.resolve('.git', 'HEAD'), commonDir: path.resolve('.git') });
+		const rootReady = await Promise.race([
+			waitForRepository().then(() => true),
+			new Promise((resolve) => { const timer = setTimeout(() => resolve(false), 1000); timer.unref(); }),
+		]);
+		assert.equal(rootReady, true, 'Comparison branch choices must not wait for default-target discovery');
+		assert.equal(diagnostics.diagnosticsSnapshot().milestones['startup.comparisonResolved'], undefined);
+		assert.ok(diagnostics.diagnosticsSnapshot().milestones['startup.repositoryReady']);
+		releaseDefaults();
+		const failed = await Promise.allSettled([firstPane, secondPane]);
+		assert.ok(failed.every((result) => result.status === 'rejected' && /transient/.test(result.reason.message)));
+		assert.equal(failures.length, 1);
+		assert.ok(watches[1].disposed && watches[2].disposed, 'failed initialization disposes its early watches');
+		await Promise.all([
+			panes.get('searchlight.comparison').resolveWebviewView({}, {}, {}),
+			panes.get('searchlight.files').resolveWebviewView({}, {}, {}),
+		]);
 		await new Promise(setImmediate);
 		assert.ok(diagnostics.diagnosticsSnapshot().milestones['startup.backgroundComplete']);
 		assert.ok(diagnostics.diagnosticsSnapshot().milestones['startup.comparisonResolved']);
 		assert.equal(diagnostics.diagnosticsSnapshot().pending.length, 0);
+		assert.equal(rootQueries, 2);
+		assert.equal(snapshotCalls, 2);
+		assert.equal(watches[1].pattern.pattern, '{HEAD,config.worktree}');
+		assert.equal(watches[2].pattern.pattern, '{refs/**,packed-refs,config}');
+		assert.equal(resolveCalls, 1);
+		assert.equal(snapshots[0], snapshots[1], 'defaults and resolution share one watched snapshot');
+		assert.equal(snapshots[0].refs, 'captured refs');
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		assert.equal(resolveCalls, 2, 'a ref change during startup must receive a fresh trailing resolution');
+		assert.equal(snapshots[2], undefined, 'a startup race cannot reuse the older captured refs');
+		assert.ok(diagnostics.diagnosticsSnapshot().records.some((record) =>
+			record.name === 'refs.refreshRequested' && record.fields.reason === 'startup-raced'));
+		const comparisonBefore = comparisonRefreshes, filesBefore = fileRefreshes;
+		repoChanged('working-tree');
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		assert.equal(resolveCalls, 2);
+		assert.equal(comparisonRefreshes, comparisonBefore);
+		assert.equal(fileRefreshes, filesBefore + 1);
+		raceDuringResolve = true;
+		repoChanged('head-or-refs');
+		await new Promise((resolve) => setTimeout(resolve, 650));
+		assert.equal(resolveCalls, 4, 'a ref event during resolution retains a trailing fresh pass');
+		assert.equal(invalidations, 4, 'each initialization invalidates unwatched cached data; only actual ref events add more');
 	} finally {
-		release('fixture-workspace');
+		releaseDefaults();
+		release({ root: 'fixture-workspace', headPath: path.resolve('.git', 'HEAD'), commonDir: path.resolve('.git') });
 		for (const subscription of context.subscriptions) { subscription.dispose(); }
 	}
 });

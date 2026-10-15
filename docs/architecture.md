@@ -15,8 +15,8 @@ together and why.
 3. **Never clobber the original.** The schema is a backward-compatible superset of
    `Gururagavendra.local-pr-review`, but Searchlight writes to its **own** storage path
    (`.vscode/searchlight-reviews/`) so both extensions can coexist.
-4. **Fast activation.** Windows Defender scans `git.exe` on each spawn during the startup burst
-   (measured tens of seconds). Activation must return before doing git work.
+4. **Fast activation.** Git waits and shared host stalls can consume seconds during startup.
+   Activation must return before doing Git work; local spans alone cannot identify the OS cause.
 5. **Testable core.** The data model is `vscode`-free so schema parsing and migrations can be unit
    tested without the extension host.
 
@@ -200,16 +200,36 @@ cannot replace a newer selection. Collapse-all now belongs to Comparison's title
    watcher, and ~40 commands.
 6. Leave heavy comparison initialization **deferred** until a pane, comparison command, or new
    inline discussion needs it. Concurrent requests share initialization of the repo root,
-   defaults, comparison, subscriptions and first refresh.
+   metadata, subscriptions, defaults, comparison and first refresh.
+
+Initialization captures the repository root, worktree HEAD path and shared Git directory in one
+Git read, then installs HEAD/ref/configuration watches before reading comparison metadata. One
+generation-scoped HEAD/ref snapshot feeds default-target discovery and baseline resolution.
+Changing HEAD, refs or local/worktree Git configuration invalidates reuse; changes during resolution
+retain a trailing fresh pass. Failed initialization disposes its early subscriptions before retrying.
+The snapshot is not a persistent ref cache, and manual/later resolutions read live metadata.
+
+The CLI HEAD fallback captures branch and commit in one shell-free process, sharing only simultaneous
+same-repository reads. A ready Git API HEAD takes precedence. Initial API discovery is not itself
+an on-disk mutation. Worktree-only Git notifications refresh files, checklist validation and threads
+without repeating baseline ancestry or Comparison branch/staleness queries.
+
+Comparison's HTML shell is immediate, but branch/HEAD/staleness requests wait for shared
+**repository readiness**, not a completed baseline. This avoids querying the placeholder nested
+workspace and reloading its catalogue after root detection, without serializing branch choices
+behind target discovery. Superseded/disposed view requests stop before starting Git work.
+Ordinary Comparison refreshes use the model's resolved HEAD; explicit branch/manual refreshes
+still read live HEAD. Initial API hydration cannot invalidate a disk catalogue protected by the
+early filesystem watches.
 
 `onStartupFinished` activation makes inline discussions available in ordinary and Source Control
 editors without opening Searchlight. Existing threads/replies do not require comparison Git work.
 Usage observation starts here too, independently of performance logging; it records fixed feature
 labels and editor categories, never user content. See [Local feature usage](usage-diagnostics.md).
 
-This ordering exists because on Windows, git spawns during the startup burst are each scanned by
-Defender; awaiting them in `activate()` measured tens of seconds of dead time. Returning first and
-doing git work in the background keeps the panel responsive.
+This ordering exists because subprocess waits and shared extension-host stalls have measured tens
+of seconds during startup. Extension-local timings do not establish antivirus causality. Returning
+first and reducing the critical comparison work keeps the panel responsive.
 
 `refreshAll()` refreshes all three providers, re-renders the CommentController from disk, and updates
 the status bar.
@@ -347,7 +367,7 @@ reply. **No LM API, no keys, no in-extension model call.**
 | External agent, not embedded model | No keys/telemetry in the extension; the schema is the whole contract; the agent side already exists |
 | Own storage path `.vscode/searchlight-reviews/` | Coexist with the original `local-pr-review` without clobbering its `.vscode/local-reviews/` |
 | `vscode`-free `reviewModel.ts` | Unit-test the schema + `normalizeSeq` migration without the extension host |
-| Fast-return activation + background git | Defender-scanned git spawns made awaited activation take tens of seconds |
+| Fast-return activation + on-demand Git | Multi-second dependency waits must not block extension activation |
 | Durable `seqCounter` for thread `#NN` ids | A transiently-empty in-memory review must not reset/reuse a display id; monotonic counter fixes it |
 | Combined selectors + compact commit tree | Avoid the prose ancestry wall and duplicate Commits pane; choose bases through native commit context menus |
 | No-shell git helpers (`listWorktreesCli`) | Avoid flashing shell windows and reduce spawn cost on the hot path |

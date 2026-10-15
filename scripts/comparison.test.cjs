@@ -201,7 +201,7 @@ function comparisonFixture() {
 		'./gitApi': gitApi,
 		'./git': git,
 		'./baseline': {
-			resolveBaseline: (...args) => resolveBaseline(...args, h.query),
+			resolveBaseline: (cwd, base, compare, pin, _query, refs) => resolveBaseline(cwd, base, compare, pin, h.query, refs),
 			resolveBaselinePin: (...args) => resolveBaselinePin(...args, h.query),
 		},
 		'./reviewStore': {
@@ -215,6 +215,45 @@ function comparisonFixture() {
 	const create = () => new ActiveComparison(repo, repo, state);
 	return { h, state, calls, git, gitApi, create, active: create(), reviewStore: mocks['./reviewStore'] };
 }
+
+test('startup shares captured refs and HEAD, but later resolutions read live refs again', async () => {
+	const f = comparisonFixture();
+	const refs = f.h.refs.map((ref) => [...ref, ''].join('\t')).join('\n') +
+		`\nrefs/heads/feature\t${D}\t\t`;
+	const snapshot = { head: { branch: 'feature', commit: D, detached: false }, refs };
+	let heads = 0, commits = 0;
+	f.gitApi.getHead = async () => { heads++; return snapshot.head; };
+	const resolve = f.git.resolveCommit;
+	f.git.resolveCommit = async (...args) => { commits++; return resolve(...args); };
+	await f.active.computeDefaults(snapshot);
+	await f.active.resolve(snapshot);
+	assert.equal(f.active.compareCommit, D);
+	assert.equal(f.active.baselineCommit, C);
+	assert.equal(heads, 0);
+	assert.equal(commits, 0);
+	assert.equal(f.h.calls.filter((args) => args[0] === 'for-each-ref').length, 0);
+	f.h.refs[1][1] = B;
+	await f.active.resolve();
+	assert.equal(f.active.baselineCommit, B);
+	assert.equal(heads, 1);
+	assert.equal(commits, 1);
+	assert.equal(f.h.calls.filter((args) => args[0] === 'for-each-ref').length, 1);
+});
+
+test('startup does not reuse an API HEAD that disagrees with captured branch refs', async () => {
+	const f = comparisonFixture();
+	const refs = f.h.refs.map((ref) => [...ref, ''].join('\t')).join('\n') +
+		`\nrefs/heads/feature\t${D}\t\t`;
+	const snapshot = { head: { branch: 'feature', commit: B, detached: false }, refs };
+	let commits = 0;
+	const resolve = f.git.resolveCommit;
+	f.git.resolveCommit = async (...args) => { commits++; return resolve(...args); };
+	await f.active.computeDefaults(snapshot);
+	await f.active.resolve(snapshot);
+	assert.equal(f.active.compareCommit, D);
+	assert.equal(f.active.baselineCommit, C);
+	assert.equal(commits, 1);
+});
 
 test('pins persist across reloads, invalidate caches, reset to Auto, and stay scoped to a comparison', async () => {
 	const f = comparisonFixture();
@@ -490,6 +529,7 @@ test('Comparison retains the approved selectors without Pin/Auto controls and su
 		if (!nodes.has(id)) {
 			nodes.set(id, {
 				value: '', handlers: {}, classList: { add() {}, remove() {}, toggle() {} },
+				scrollTop: 0, scrollHeight: 0, clientHeight: 0,
 				addEventListener(event, handler) { this.handlers[event] = handler; },
 				setAttribute(name, value) { this[name] = value; },
 			});
@@ -500,6 +540,7 @@ test('Comparison retains the approved selectors without Pin/Auto controls and su
 	const receivers = [];
 	const context = vm.createContext({
 		performance: { now: () => 0 },
+		ResizeObserver: class { observe() {} },
 		acquireVsCodeApi: () => ({ postMessage: (message) => messages.push(message.type) }),
 		document: { getElementById: node, querySelector: node, activeElement: null },
 		window: { addEventListener: (_, handler) => { receivers.push(handler); } },
@@ -546,7 +587,7 @@ test('review reload picks up external replies without overwriting a comparison s
 	assert.equal(f.active.review, replacement);
 });
 
-function catalogFixture() {
+function catalogFixture(initialize) {
 	const requests = [];
 	const states = [];
 	let staleQueries = 0;
@@ -567,12 +608,13 @@ function catalogFixture() {
 		'./git': { aheadBehind: async () => { staleQueries++; return undefined; } },
 		'./webviewMetrics': {
 			PaneMetrics: class {
+				bind() {}
 				async build(work) { return work(); }
 				post(state) { states.push(state); }
 			},
 		},
 	});
-	const provider = new ComparisonWebviewProvider(() => active, () => {}, () => {}, () => {}, () => {});
+	const provider = new ComparisonWebviewProvider(() => active, () => {}, () => {}, () => {}, initialize);
 	provider.view = {};
 	return { provider, active, requests, states, gitApi, setHead: (value) => { head = value; }, staleQueries: () => staleQueries };
 }
@@ -582,6 +624,106 @@ const branchCatalog = [
 	{ name: 'feature', kind: 'local', commit: D },
 	{ name: 'origin/main', kind: 'remote', commit: C },
 ];
+
+test('visible Comparison waits for initialized root and skips superseded startup requests before any Git query', async () => {
+	const gate = deferred();
+	const f = catalogFixture(() => gate.promise);
+	let heads = 0;
+	f.gitApi.getHead = async () => { heads++; return { branch: 'feature', detached: false }; };
+	const waiting = ['view-resolve', 'ready', 'refresh'].map((reason) => f.provider.postState(reason));
+	assert.equal(f.requests.length, 0);
+	assert.equal(heads, 0);
+	assert.equal(f.staleQueries(), 0);
+	f.active.repoRootFsPath = 'resolved-repository-root';
+	f.active.comparisonKey = 'resolved-pair';
+	f.provider.invalidateBranches();
+	waiting.push(f.provider.postState('startup'));
+	gate.resolve();
+	await new Promise(setImmediate);
+	assert.equal(f.requests.length, 1);
+	assert.equal(f.requests[0].cwd, 'resolved-repository-root');
+	assert.equal(heads, 1);
+	f.requests[0].resolve(branchCatalog);
+	await Promise.all(waiting);
+	assert.equal(f.states.length, 1);
+	assert.equal(f.states[0].branches.length, 3);
+});
+
+test('Comparison initialization failures are visible without Git queries and explicit retry still works', async () => {
+	let failed = true;
+	const f = catalogFixture(async () => {
+		if (failed) { throw new Error('initialization failed'); }
+	});
+	await f.provider.postState('ready');
+	assert.equal(f.requests.length, 0);
+	assert.equal(f.states.length, 1);
+	assert.equal(f.states[0].ready, false);
+	assert.match(f.states[0].baselineError, /initialization failed/);
+	failed = false;
+	const retry = f.provider.postState('manual-refresh');
+	await new Promise(setImmediate);
+	f.requests[0].resolve(branchCatalog);
+	await retry;
+	assert.equal(f.states.at(-1).branches.length, 3);
+});
+
+test('initialized but unselected comparisons still load branch choices for repair and disabled defaults', async () => {
+	const f = catalogFixture(async () => {});
+	f.active.base = undefined;
+	f.active.compare = undefined;
+	f.active.baselineCommit = undefined;
+	const state = f.provider.postState('startup');
+	await new Promise(setImmediate);
+	f.requests[0].resolve(branchCatalog);
+	await state;
+	assert.equal(f.states[0].ready, false);
+	assert.equal(f.states[0].branches.length, 3);
+});
+
+test('ordinary Comparison refreshes reuse resolved HEAD while explicit branch refresh reads live HEAD', async () => {
+	const f = catalogFixture();
+	f.active.headBranch = 'feature';
+	f.active.headCommit = D;
+	let queries = 0;
+	f.gitApi.getHead = async () => { queries++; return { branch: 'main', commit: A, detached: false }; };
+	const startup = f.provider.postState('startup');
+	f.requests[0].resolve(branchCatalog);
+	await startup;
+	assert.equal(queries, 0);
+	assert.equal(f.states[0].branches.find((branch) => branch.name === 'feature').isHead, true);
+	f.provider.refresh(true);
+	f.requests[1].resolve(branchCatalog);
+	await new Promise(setImmediate);
+	assert.equal(queries, 1);
+	assert.equal(f.states.at(-1).branches.find((branch) => branch.name === 'main').isHead, true);
+});
+
+test('a replaced Comparison view cannot resume its old initialization request', async () => {
+	const gate = deferred();
+	const f = catalogFixture(() => gate.promise);
+	const old = f.provider.postState('view-resolve');
+	f.provider.view = {};
+	gate.resolve();
+	await old;
+	assert.equal(f.requests.length, 0);
+	assert.equal(f.states.length, 0);
+});
+
+test('disposing the Comparison shell cancels gated branch work without cancelling shared initialization', async () => {
+	const gate = deferred();
+	const f = catalogFixture(() => gate.promise);
+	let dispose;
+	f.provider.resolveWebviewView({
+		onDidDispose: (handler) => { dispose = handler; return { dispose() {} }; },
+		webview: { onDidReceiveMessage() {} },
+	});
+	dispose();
+	gate.resolve();
+	await new Promise(setImmediate);
+	assert.equal(f.requests.length, 0);
+	assert.equal(f.states.length, 0);
+	assert.equal(f.provider.view, undefined);
+});
 
 test('startup view/ready/refresh requests share one enumeration and only the latest builds staleness', async () => {
 	const f = catalogFixture();
@@ -796,8 +938,9 @@ test('Git API separates actual ref changes from worktree-only events for catalog
 	let onOpen;
 	let invalidations = 0;
 	let refreshes = 0;
+	const changes = [];
 	const repository = {
-		state: { refs: [{ type: 0, name: 'main', commit: A }], onDidChange: (handler) => {
+		state: { HEAD: { name: 'main', commit: A }, refs: [{ type: 0, name: 'main', commit: A }], onDidChange: (handler) => {
 			onChange = handler;
 			return { dispose() {} };
 		} },
@@ -811,7 +954,7 @@ test('Git API separates actual ref changes from worktree-only events for catalog
 		Uri: { file: (fsPath) => ({ fsPath }) },
 		Disposable: class { constructor(dispose) { this.dispose = dispose; } },
 	} });
-	const subscription = await gitApi.onRepoStateChanged(repo, () => refreshes++, () => invalidations++);
+	const subscription = await gitApi.onRepoStateChanged(repo, (change) => { refreshes++; changes.push(change); }, () => invalidations++);
 	onOpen();
 	assert.equal(invalidations, 0);
 	assert.equal(refreshes, 0);
@@ -825,5 +968,102 @@ test('Git API separates actual ref changes from worktree-only events for catalog
 	onChange();
 	assert.equal(invalidations, 2);
 	assert.equal(refreshes, 4);
+	repository.state.refs.reverse();
+	onChange();
+	repository.state.HEAD = { name: 'other', commit: C };
+	onChange();
+	assert.deepEqual(changes, ['working-tree', 'working-tree', 'head-or-refs', 'head-or-refs', 'working-tree', 'head-or-refs']);
+	repository.state.HEAD.upstream = { remote: 'upstream', name: 'integration' };
+	onChange();
+	assert.equal(changes.at(-1), 'head-or-refs', 'upstream changes affect the baseline without moving HEAD');
+	assert.equal(invalidations, 2);
+	subscription.dispose();
+});
+
+test('CLI HEAD reads are batched and only share in-flight work for the same repository', async () => {
+	const requests = [];
+	let readyRepository;
+	const api = {
+		repositories: [],
+		getRepository: (uri) => path.resolve(uri.fsPath).toLowerCase() === repo.toLowerCase() ? readyRepository : undefined,
+	};
+	const gitApi = loadCompiled('gitApi', {
+		vscode: {
+			extensions: { getExtension: () => ({ isActive: true, exports: { getAPI: () => api } }) },
+			Uri: { file: (fsPath) => ({ fsPath }) },
+		},
+		'./git': { getHeadCli: (cwd) => new Promise((resolve, reject) => requests.push({ cwd, resolve, reject })) },
+	});
+	const first = gitApi.getHead(repo);
+	const second = gitApi.getHead(repo.replace(/\\/g, '/'));
+	const other = gitApi.getHead(path.join(repo, 'other'));
+	await new Promise(setImmediate);
+	assert.equal(requests.length, 2);
+	readyRepository = { state: { HEAD: { name: 'fresh', commit: B } } };
+	assert.deepEqual(await gitApi.getHead(repo), { branch: 'fresh', commit: B, detached: false });
+	requests[0].resolve({ branch: 'old', commit: A, detached: false });
+	requests[1].resolve({ commit: C, detached: true });
+	assert.deepEqual(await first, await second);
+	assert.equal((await other).commit, C);
+	readyRepository = undefined;
+	const failed = gitApi.getHead(repo);
+	const rejection = assert.rejects(failed, /read failed/);
+	await new Promise(setImmediate);
+	requests[2].reject(new Error('read failed'));
+	await rejection;
+	const retry = gitApi.getHead(repo);
+	await new Promise(setImmediate);
+	assert.equal(requests.length, 4);
+	requests[3].resolve({ branch: 'new', commit: D, detached: false });
+	assert.equal((await retry).commit, D);
+});
+
+test('one repository probe resolves nested-workspace watch paths relative to the queried cwd', async () => {
+	const calls = [];
+	const cwd = path.join(repo, 'nested directory');
+	const execFile = () => {};
+	execFile[require('node:util').promisify.custom] = async (_, args) => {
+		calls.push(args);
+		return { stdout: `${repo}\n..${path.sep}.git${path.sep}HEAD\n..${path.sep}.git\n` };
+	};
+	const git = loadCompiled('git', { child_process: { execFile, exec: () => assert.fail('Do not launch a shell') } });
+	assert.deepEqual(await git.getRepositoryInfo(cwd),
+		{ root: repo, headPath: path.join(repo, '.git', 'HEAD'), commonDir: path.join(repo, '.git') });
+	assert.deepEqual(calls, [['rev-parse', '--show-toplevel', '--git-path', 'HEAD', '--git-common-dir']]);
+});
+
+test('captured refs determine normal repository defaults without more Git launches', async () => {
+	const execFile = () => {};
+	execFile[require('node:util').promisify.custom] = async () => assert.fail('Snapshot should cover this query');
+	const git = loadCompiled('git', { child_process: { execFile, exec: () => assert.fail('Do not launch a shell') } });
+	const remote = `refs/remotes/origin/HEAD\t${A}\t\trefs/remotes/origin/integration`;
+	assert.equal(await git.defaultBaseBranch(repo, remote), 'origin/integration');
+	assert.equal(await git.defaultBaseBranch(repo, `refs/heads/main\t${B}\t\t\n${remote}`), 'main');
+});
+
+test('initial Git API hydration is discovery, while subsequent HEAD/ref changes remain mutations', async () => {
+	let changed;
+	const changes = [];
+	const refChanges = [];
+	const repository = { state: { refs: [], HEAD: undefined, onDidChange: (handler) => {
+		changed = handler; return { dispose() {} };
+	} } };
+	const api = { getRepository: () => repository, onDidOpenRepository: () => ({ dispose() {} }) };
+	const gitApi = loadCompiled('gitApi', { vscode: {
+		extensions: { getExtension: () => ({ isActive: true, exports: { getAPI: () => api } }) },
+		Uri: { file: (fsPath) => ({ fsPath }) },
+		Disposable: class { constructor(dispose) { this.dispose = dispose; } },
+	} });
+	const subscription = await gitApi.onRepoStateChanged(repo, (change) => changes.push(change),
+		(change) => refChanges.push(change));
+	repository.state.HEAD = { name: 'main', commit: A };
+	repository.state.refs = [{ type: 0, name: 'main', commit: A }];
+	changed();
+	changed();
+	repository.state.HEAD.commit = B;
+	repository.state.refs[0].commit = B;
+	changed();
+	assert.deepEqual(changes, ['opened', 'working-tree', 'head-or-refs']);
+	assert.deepEqual(refChanges, ['opened', 'head-or-refs']);
 	subscription.dispose();
 });

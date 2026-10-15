@@ -97,9 +97,12 @@ No test stages, commits, or changes branches in the developer's repository.
 ## 5. Performance notes
 
 - **Fast-return activation.** `activate()` does no awaited git work; shared comparison initialization
-  is requested by panes, comparison commands or new discussions. See `architecture.md` §5. Root cause: on
-  Windows, Defender scans `git.exe` on every spawn during the startup burst (measured tens of
-  seconds), so git must not be awaited in `activate()`.
+  is requested by panes, comparison commands or new discussions. See `architecture.md` §5.
+  Subprocess waits and shared extension-host stalls can consume seconds; local timings cannot
+  attribute that delay to antivirus or a particular extension.
+- **Bounded startup metadata.** Root/watch paths are batched; one watched-generation HEAD/ref
+  snapshot feeds target discovery and baseline resolution. Worktree-only notifications do not
+  repeat ancestry. Ref/configuration changes and explicit Refresh retain fresh resolution.
 - **No-shell git helpers ("KB-001").** `git.ts` uses `child_process` with an argv array (no shell),
   e.g. `listWorktreesCli` / `gitv`, to avoid flashing shell windows and reduce spawn overhead on the
   hot path.
@@ -168,6 +171,12 @@ The read-only Git-query fixtures cover advancing/stale target refs, rebases, sta
 explicit remote selection, ambiguous ancestry, pin persistence/reset/invalidation, and consistent
 baseline endpoints across file lists, commits and diff editors. They do not modify any Git refs,
 index, or working-tree files. No extension host or additional test dependency is required.
+Startup regressions additionally cover attached/detached/unborn CLI HEAD reads, nested and linked
+worktree watch paths, in-flight HEAD-query isolation/retry, snapshot expiry, API hydration versus
+real HEAD/ref/upstream changes, and trailing refreshes for changes during initialization/resolution.
+Comparison tests also require no placeholder-root queries, root-ready rather than baseline-ready
+release, cancelled disposed/superseded requests, visible initialization errors with retry, and
+model HEAD reuse without weakening explicit live branch refresh.
 
 `reviewed-files.test.cjs` covers two-sided fingerprints, legacy-check reset, saved-only invalidation,
 staging/commit and baseline identity, hidden/deleted files, binary and literal-path Git reads,

@@ -75,6 +75,39 @@ async function repository(t) {
 	return { cwd, metadata, main, parent, child, commit, ref, object };
 }
 
+test('batched CLI metadata supports attached, detached, unborn and nested-workspace states', async (t) => {
+	const r = await repository(t);
+	const nested = path.join(r.cwd, 'nested directory');
+	await fs.mkdir(nested);
+	const metadata = await git.getRepositoryInfo(nested);
+	assert.equal(path.resolve(metadata.root), r.cwd);
+	assert.equal(metadata.headPath, path.join(r.metadata, 'HEAD'));
+	assert.equal(metadata.commonDir, r.metadata);
+	assert.deepEqual(await git.getHeadCli(nested), { branch: 'feature/child', commit: r.child, detached: false });
+	await fs.writeFile(path.join(r.metadata, 'HEAD'), `${r.child}\n`);
+	assert.deepEqual(await git.getHeadCli(nested), { branch: undefined, commit: r.child, detached: true });
+	await fs.writeFile(path.join(r.metadata, 'HEAD'), 'ref: refs/heads/unborn\n');
+	assert.deepEqual(await git.getHeadCli(nested), { detached: false });
+	assert.equal((await git.getRepositoryInfo(nested)).headPath, metadata.headPath);
+});
+
+test('repository metadata keeps a linked worktree HEAD separate from its shared refs', async (t) => {
+	const r = await repository(t);
+	const linked = path.join(r.cwd, 'linked worktree');
+	const admin = path.join(r.metadata, 'worktrees', 'linked');
+	await fs.mkdir(linked);
+	await fs.mkdir(admin, { recursive: true });
+	await fs.writeFile(path.join(linked, '.git'), `gitdir: ${admin}\n`);
+	await fs.writeFile(path.join(admin, 'commondir'), '../..\n');
+	await fs.writeFile(path.join(admin, 'gitdir'), `${path.join(linked, '.git')}\n`);
+	await fs.writeFile(path.join(admin, 'HEAD'), 'ref: refs/heads/feature/child\n');
+	const metadata = await git.getRepositoryInfo(linked);
+	assert.equal(path.resolve(metadata.root), linked);
+	assert.equal(metadata.headPath, path.join(admin, 'HEAD'));
+	assert.equal(metadata.commonDir, r.metadata);
+	assert.equal((await git.getHeadCli(linked)).commit, r.child);
+});
+
 test('suggests the closest stacked target, preferring its local alias', async (t) => {
 	const r = await repository(t);
 	await r.ref('origin/feature/parent', r.parent, 'remotes');
@@ -315,9 +348,16 @@ class Element {
 		this.value = '';
 		this.textContent = '';
 		this.open = false;
+		this.scrollTop = 0;
+		this.scrollHeight = 0;
+		this.clientHeight = 0;
 		this.classList = { add() {}, remove() {}, toggle() {} };
 	}
 	addEventListener(type, handler) { this.listeners[type] = handler; }
+	scrollBy({ top }) {
+		this.scrollTop = Math.max(0, Math.min(this.scrollHeight - this.clientHeight, this.scrollTop + top));
+		this.listeners.scroll?.();
+	}
 	appendChild(child) {
 		this.children.push(...(child.tagName === '#fragment' ? child.children : [child]));
 	}
@@ -359,6 +399,7 @@ function webview() {
 	};
 	const messages = [];
 	const listeners = {};
+	const observers = [];
 	const provider = new ComparisonWebviewProvider(() => undefined, () => {}, () => {}, () => {}, () => {});
 	const html = provider.html();
 	const context = {
@@ -370,6 +411,10 @@ function webview() {
 		window: { addEventListener: (type, handler) => { (listeners[type] ??= []).push(handler); } },
 		acquireVsCodeApi: () => ({ postMessage: (msg) => messages.push(msg) }),
 		performance,
+		ResizeObserver: class {
+			constructor(callback) { observers.push(callback); }
+			observe() {}
+		},
 		requestAnimationFrame: (callback) => callback(),
 		setTimeout,
 	};
@@ -378,8 +423,50 @@ function webview() {
 		vm.runInContext(match[1], context);
 	}
 	const state = (value) => listeners.message.forEach((handler) => handler({ data: value }));
-	return { get, messages, state, html };
+	return { get, messages, state, html, resize: () => observers.forEach((callback) => callback()) };
 }
+
+test('Comparison overflow cue scrolls both directions without loading collapsed commits', () => {
+	const ui = webview();
+	const scroll = ui.get('comparison-scroll');
+	const cue = ui.get('overflow-cue');
+	assert.equal(cue.hidden, true);
+	scroll.clientHeight = 120;
+	scroll.scrollHeight = 320;
+	ui.resize();
+	assert.equal(cue.hidden, false);
+	assert.equal(cue.textContent, '↓ More below');
+	cue.listeners.click();
+	assert.equal(scroll.scrollTop, 120);
+	assert.equal(cue.textContent, '↓ More below');
+	cue.listeners.click();
+	assert.equal(scroll.scrollTop, 200);
+	assert.equal(cue.textContent, '↑ More above');
+	cue.listeners.click();
+	assert.equal(scroll.scrollTop, 80);
+	assert.equal(cue.textContent, '↓ More below');
+	assert.equal(ui.messages.filter((message) => message.type === 'loadCommits').length, 0);
+});
+
+test('Comparison overflow cue disappears when content fits and retains a stable footer slot', () => {
+	const ui = webview();
+	const scroll = ui.get('comparison-scroll');
+	scroll.clientHeight = 120;
+	scroll.scrollHeight = 280;
+	ui.resize();
+	assert.equal(ui.get('overflow-cue').hidden, false);
+	scroll.clientHeight = 450;
+	scroll.scrollHeight = 450;
+	ui.resize();
+	assert.equal(ui.get('overflow-cue').hidden, true);
+	assert.match(ui.html, /\.comparison-scroll\s*\{[^}]*min-height:\s*0;\s*overflow:\s*auto/);
+	assert.match(ui.html, /\.overflow-cue\s*\{[^}]*flex:\s*0\s+0\s+20px/);
+	assert.match(ui.html, /\.overflow-cue\[hidden\]\s*\{\s*display:\s*block;\s*visibility:\s*hidden/);
+	assert.match(ui.html, /id="comparison-scroll"[^>]*tabindex="0"[^>]*aria-label=/);
+	assert.match(ui.html, /id="overflow-cue"[^>]*aria-controls="comparison-scroll"/);
+	assert.match(ui.html, /\.commit-pane\s*\{[^}]*flex:\s*1\s+0\s+160px/);
+	assert.match(ui.html, /\.commit-pane\.collapsed\s*\{[^}]*min-height:\s*0/);
+});
 
 test('compact history carries immutable native-menu context and loads older pages', () => {
 	const ui = webview();

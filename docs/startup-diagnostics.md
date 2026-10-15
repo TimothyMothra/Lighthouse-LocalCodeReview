@@ -63,6 +63,23 @@ errors/fallback events before treating it as evidence that no files or reviews e
 
 ## Dependency and scheduling breakdown
 
+- `startup.repoRoot` now captures root and watch paths in one Git process; it no longer needs two
+  later watcher-path queries. Watches are installed before comparison metadata is captured.
+  `startup.comparisonSnapshot` captures HEAD and refs concurrently. `baseline.refs` with
+  `snapshot: true` reuses that generation's captured ref data; later/invalidated resolutions query
+  Git normally. `startup.snapshotUnavailable` records an explicitly logged direct-resolution fallback.
+- `startup.repositoryReady` marks the root/watch/API subscription boundary. Comparison's
+  `comparison.repositoryWait` waits for that boundary, not full default-target/baseline resolution.
+  Its branch catalogue can then load concurrently with required comparison data. Compare
+  `comparison.branches` Git starts against repository readiness to detect premature queries.
+  State requests superseded while waiting are discarded before issuing Git commands.
+- `refs.refreshRequested` distinguishes `comparisonChanged` and notifications received while
+  `initializing`. `refs.resolveSkipped` identifies a worktree-only refresh that does not run ancestry.
+  A `startup-raced` refresh preserves a HEAD/ref/configuration change during initial resolution.
+  API discovery/hydration alone is not a disk change; local/worktree Git configuration watches
+  and API upstream metadata still invalidate comparisons when tracking configuration changes.
+- `gitApi.headQuery` with `outcome: join` shares an in-flight CLI HEAD query, not a completed HEAD
+  cache. Repository isolation and newer ready API HEAD state are preserved.
 - `comparison.catalogCache` reports `miss`, `join` (shared in-flight request), or `hit` (retained
   catalog). `comparison.catalogInvalidated` records invalidation, and `comparison.stateDiscarded`
   records an overtaken state build. Startup view resolution, client readiness and initialization

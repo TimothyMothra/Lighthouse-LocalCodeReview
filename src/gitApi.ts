@@ -12,6 +12,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { event, trace } from './diagnostics';
 import {
 	BranchRef,
@@ -19,6 +20,7 @@ import {
 	listBranchesCli,
 	listWorktreesCli,
 	getRepoRoot,
+	getHeadCli,
 	pullCli,
 	pushCli,
 } from './git';
@@ -27,16 +29,23 @@ import {
 const REF_HEAD = 0;
 const REF_REMOTE = 1;
 
+interface ApiUpstream {
+	readonly remote: string;
+	readonly name: string;
+}
+
 interface ApiRef {
 	readonly type: number;
 	readonly name?: string;
 	readonly commit?: string;
 	readonly remote?: string;
+	readonly upstream?: ApiUpstream;
 }
 
 interface ApiHead {
 	readonly name?: string;
 	readonly commit?: string;
+	readonly upstream?: ApiUpstream;
 }
 
 interface ApiRepoState {
@@ -70,6 +79,8 @@ export interface HeadInfo {
 	commit?: string;
 	detached: boolean;
 }
+
+export type RepositoryChange = 'working-tree' | 'head-or-refs' | 'opened';
 
 /**
  * Resolve the vscode.git API (activating the extension if needed).
@@ -155,8 +166,8 @@ function pickRepo(api: GitAPI, cwd: string): ApiRepository | undefined {
  */
 export async function onRepoStateChanged(
 	cwd: string,
-	handler: () => void,
-	onRefsChanged?: () => void,
+	handler: (change: RepositoryChange) => void,
+	onRefsChanged?: (change: RepositoryChange) => void,
 ): Promise<vscode.Disposable | undefined> {
 	const api = await getGitApi();
 	if (!api) {
@@ -171,17 +182,31 @@ export async function onRepoStateChanged(
 			return false;
 		}
 		bound = repo;
-		const refSnapshot = () => JSON.stringify(repo.state.refs.map((ref) => [ref.type, ref.name, ref.commit]));
+		const refSnapshot = () => repo.state.refs.map((ref) =>
+			JSON.stringify([ref.type, ref.name, ref.commit, ref.upstream?.remote, ref.upstream?.name])).sort().join('\n');
+		const headSnapshot = () => JSON.stringify([repo.state.HEAD?.name, repo.state.HEAD?.commit,
+			repo.state.HEAD?.upstream?.remote, repo.state.HEAD?.upstream?.name]);
 		let previousRefs = refSnapshot();
+		let previousHead = headSnapshot();
+		let headReady = !!(repo.state.HEAD?.name || repo.state.HEAD?.commit);
+		let refsReady = repo.state.refs.length > 0;
 		subs.push(repo.state.onDidChange(() => {
 			// ASSUMPTION: index/worktree notifications alone do not invalidate branch names.
 			// Compare values, not array identity: the Git API can replace or mutate its ref array.
 			const refs = refSnapshot();
+			const head = headSnapshot();
+			const changed = refs !== previousRefs || head !== previousHead;
+			const hasHead = !!(repo.state.HEAD?.name || repo.state.HEAD?.commit);
+			const discovered = (!headReady && hasHead) || (!refsReady && repo.state.refs.length > 0);
+			headReady ||= hasHead;
+			refsReady ||= repo.state.refs.length > 0;
 			if (refs !== previousRefs) {
 				previousRefs = refs;
-				onRefsChanged?.();
+				onRefsChanged?.(discovered ? 'opened' : 'head-or-refs');
 			}
-			handler();
+			previousHead = head;
+			// Initial API hydration is discovery, not proof of an on-disk mutation.
+			handler(discovered ? 'opened' : changed ? 'head-or-refs' : 'working-tree');
 		}));
 		event('gitApi.subscription', { outcome: 'bound' });
 		return true;
@@ -198,8 +223,8 @@ export async function onRepoStateChanged(
 			api.onDidOpenRepository(() => {
 				const repo = pickRepo(api, cwd);
 				if (repo && bind(repo)) {
-					onRefsChanged?.();
-					handler();
+					onRefsChanged?.('opened');
+					handler('opened');
 				}
 			}),
 		);
@@ -263,6 +288,8 @@ export async function listBranches(cwd: string): Promise<BranchRef[]> {
 }
 
 /** Current HEAD (branch/commit/detached) for `cwd` (API first, CLI fallback). */
+const pendingHeads = new Map<string, Promise<HeadInfo>>();
+
 export async function getHead(cwd: string): Promise<HeadInfo> {
 	const api = await getGitApi();
 	const repo = api ? pickRepo(api, cwd) : undefined;
@@ -282,17 +309,19 @@ export async function getHead(cwd: string): Promise<HeadInfo> {
 		operation: 'getHead', source: 'cli',
 		reason: !api ? 'apiUnavailable' : !repo ? 'repositoryMissing' : 'headMissing',
 	});
-	// CLI fallback: rev-parse abbrev; 'HEAD' means detached.
-	const root = await getRepoRoot(cwd);
-	if (!root) {
-		event('gitApi.unavailable', { operation: 'getHead', reason: 'repositoryRootMissing' });
-		return { detached: false };
+	// ASSUMPTION: share in-flight CLI reads only. A ready API HEAD always wins over an older CLI read.
+	const key = path.resolve(cwd);
+	const normalized = process.platform === 'win32' ? key.toLowerCase() : key;
+	const existing = pendingHeads.get(normalized);
+	if (existing) {
+		event('gitApi.headQuery', { outcome: 'join' });
+		return existing;
 	}
-	const { getCurrentBranch, getCurrentCommit } = await import('./git');
-	const branch = await getCurrentBranch(cwd);
-	const commit = await getCurrentCommit(cwd);
-	const detached = branch === 'HEAD';
-	return { branch: detached ? undefined : branch, commit, detached };
+	const pending = getHeadCli(cwd).finally(() => {
+		if (pendingHeads.get(normalized) === pending) { pendingHeads.delete(normalized); }
+	});
+	pendingHeads.set(normalized, pending);
+	return pending;
 }
 
 /** `git pull` for `cwd` (API first, CLI fallback). Throws on failure. */

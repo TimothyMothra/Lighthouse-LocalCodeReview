@@ -21,13 +21,15 @@ import * as gitApi from './gitApi';
 import {
 	BranchRef,
 	getRepoRoot,
+	getRepositoryInfo,
+	readComparisonRefs,
 	fetch as gitFetch,
 	aheadBehind,
 	fastForward,
 	fastForwardRef,
 	runGitQuery,
 } from './git';
-import { ActiveComparison } from './activeComparison';
+import { ActiveComparison, ComparisonSnapshot } from './activeComparison';
 import { ComparisonWebviewProvider } from './comparisonView';
 import { FilesWebviewProvider, isUncommittedHidden, syncUncommittedContext } from './filesWebview';
 import { ConversationsWebviewProvider, isResolvedHidden, syncResolvedContext } from './conversationsWebview';
@@ -113,14 +115,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		{ dispose: () => clearInterval(usageTimer) },
 	);
 
-	let initializeComparison: (() => Promise<void>) | undefined;
+	let initializeComparison: ((repositoryReady: () => void) => Promise<void>) | undefined;
 	let comparisonInit: Promise<void> | undefined;
+	let repositoryReady: Promise<void> | undefined;
 	const ensureComparison = async (reason: string): Promise<void> => {
 		if (!initializeComparison) { throw new Error('Searchlight: open a workspace before starting a comparison.'); }
 		if (!comparisonInit) {
 			milestone('startup.comparisonRequested', { reason });
 			sampleHostForMinute();
-			comparisonInit = initializeComparison().catch((error) => {
+			let publishRepositoryReady: (() => void) | undefined;
+			repositoryReady = new Promise<void>((resolve) => { publishRepositoryReady = resolve; });
+			if (!publishRepositoryReady) { throw new Error('Could not create repository readiness signal.'); }
+			comparisonInit = initializeComparison(publishRepositoryReady).catch((error) => {
 				comparisonInit = undefined;
 				milestone('startup.failed');
 				log(`Comparison initialization failed: ${errMessage(error)}`);
@@ -129,6 +135,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			});
 		}
 		await comparisonInit;
+	};
+	const ensureRepository = async (): Promise<void> => {
+		const initialized = ensureComparison('comparison-data');
+		// Observe initialization failures without serializing branch choices behind target discovery.
+		await (repositoryReady ? Promise.race([repositoryReady, initialized]) : initialized);
 	};
 	const independentCommands = new Set([
 		'searchlight.exportStartupDiagnostics', 'searchlight.openThreadLocation',
@@ -230,13 +241,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 	// The single in-memory "active comparison" that feeds all review views.
 	//
-	// NOTE: activate() must return FAST. On Windows, antivirus (Defender) scans git.exe on each
-	// spawn during the startup burst, so getRepoRoot / computeDefaults / resolve can each take
-	// several seconds (measured ~5s / ~18s / ~10s → 33s total) — but the SAME git ops are fast
-	// once the AV scan settles. VS Code shows "Activating Extensions..." until activate() resolves,
-	// so the fix is to STOP blocking activation on git, not to make git faster. We construct
-	// `active` with a `wsFolder` placeholder. Comparison initialization is shared and deferred
-	// until a pane, comparison command, or new discussion actually needs it.
+	// ASSUMPTION: subprocess waits and shared extension-host stalls can dominate startup;
+	// these timings alone do not establish antivirus causality. Keep activation independent
+	// of Git, then minimize the work needed for the first useful comparison.
 	const active = new ActiveComparison(wsFolder, wsFolder, context.workspaceState);
 
 	// Inline comment threads. Constructed after `active` so new (first-ever) threads can target
@@ -263,6 +270,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				comparisonProvider.postUpdateResult(row, ok, message),
 			);
 		},
+		ensureRepository,
 	);
 	const conversationsProvider = new ConversationsWebviewProvider(() => active, context.workspaceState);
 	const reviewedFiles = new ReviewedFiles(() => active, () => filesProvider.refreshAvailability(), log);
@@ -308,14 +316,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	);
 
 	// Refresh all views + inline comments + status bar together.
-	const refreshAll = (reason = 'command-or-review-action') => {
+	const refreshAll = (reason = 'command-or-review-action', comparisonChanged = true) => {
 		// Dispatch stays fire-and-forget; child spans retain this refresh's correlation context.
 		void trace('refresh.dispatch', async () => {
 			event('refresh.request', { reason });
 			reviewedFiles.reconcile(reason);
 			if (reason === 'manual-refresh' || reason === 'manual-resolve-refresh') { conversationDocuments.refresh(); }
 			if (reason === 'manual-refresh' || reason === 'manual-resolve-refresh') { conversationPages.refresh(); }
-			comparisonProvider.refresh(['manual-refresh', 'manual-resolve-refresh', 'git-operation'].includes(reason));
+			if (comparisonChanged) {
+				comparisonProvider.refresh(['manual-refresh', 'manual-resolve-refresh', 'git-operation'].includes(reason));
+			}
 			filesProvider.refresh();
 			conversationsProvider.refresh();
 			void comments.render();
@@ -672,106 +682,153 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	// invoked later by a pane, comparison command, or new-thread submission, never just by activation.
 	perf('activate total', tActivate);
 
-	initializeComparison = () => trace('startup.background', async () => {
-		const tBg = now();
-
-		const tRepo = now();
-		const detectedRoot = await trace('startup.repoRoot', () => getRepoRoot(wsFolder));
-		const repoRoot = detectedRoot ?? wsFolder;
-		event('startup.repoRootResult', { fallback: !detectedRoot });
-		perf('getRepoRoot', tRepo);
-		active.repoRootFsPath = repoRoot;
-
-		// Populate the review views: compute default base/compare (unless disabled), resolve, refresh.
-		const autoCreateOnEmpty = vscode.workspace
-			.getConfiguration('searchlight')
-			.get<boolean>('autoCreateOnEmpty', true);
-		if (autoCreateOnEmpty) {
-			const tDefaults = now();
-			await active.computeDefaults();
-			perf('computeDefaults', tDefaults);
-		}
-		const tResolve = now();
-		await active.resolve();
-		perf('resolve', tResolve);
-		setComparisonSettled();
-		milestone('startup.comparisonResolved', { outcome: active.baselineError ? 'error' : active.baselineCommit ? 'ready' : 'unselected' });
-		refreshAll('startup');
-
-		// Watch for branch switches. Nothing else observes `git checkout`, so without this the panes
-		// keep showing whatever branch was current at activation. Debounced because git fires several
-		// state events per checkout; `inFlight` prevents the handler re-entering itself (resolve() can
-		// mutate `compare` via auto-follow, but that is idempotent and refreshAll() only posts webview
-		// state — neither touches git, so this cannot loop).
-		let headTimer: NodeJS.Timeout | undefined;
-		let inFlight = false;
-		const onHeadChanged = (reason = 'git-api-state'): void => {
-			if (reason === 'ref-changed' || reason === 'ref-created' || reason === 'ref-deleted') {
-				comparisonProvider.invalidateBranches();
-			}
-			event('refs.refreshRequested', { reason, coalesced: !!headTimer, inFlight });
-			if (headTimer) {
-				clearTimeout(headTimer);
-			}
-			headTimer = setTimeout(() => {
-				headTimer = undefined;
-				if (inFlight) {
-					// A ref update during resolution must trigger another pass, not be dropped.
-					onHeadChanged('retry-in-flight');
-					return;
-				}
-				inFlight = true;
-				void (async () => {
-					try {
-						await active.resolve();
-						refreshAll(reason);
-					} finally {
-						inFlight = false;
-					}
-				})();
-			}, 250);
+	initializeComparison = (publishRepositoryReady) => {
+		const startupSubscriptions: vscode.Disposable[] = [];
+		const subscribe = (subscription: vscode.Disposable): void => {
+			startupSubscriptions.push(subscription);
+			context.subscriptions.push(subscription);
 		};
+		return trace('startup.background', async () => {
+			const tBg = now();
+			const gitReady = gitApi.getGitApi();
 
-		const repoSub = await trace('startup.gitSubscription', () =>
-			gitApi.onRepoStateChanged(repoRoot, onHeadChanged, () => comparisonProvider.invalidateBranches()));
-		if (repoSub) {
-			context.subscriptions.push(repoSub);
-		}
+			const tRepo = now();
+			const repository = await trace('startup.repoRoot', () => getRepositoryInfo(wsFolder));
+			const repoRoot = repository?.root ?? wsFolder;
+			event('startup.repoRootResult', { fallback: !repository });
+			perf('getRepoRoot', tRepo);
+			active.repoRootFsPath = repoRoot;
 
-		// Auto-reveal: track the active editor in the Changed Files tree. Reveal-only — it never opens
-		// or closes an editor, so it cannot fight the user's tab focus.
-		context.subscriptions.push(
-			vscode.window.onDidChangeActiveTextEditor((ed) => filesProvider.revealForUri(ed?.document.uri)),
-		);
-		// Reveal whatever is already open, so a file open at activation doesn't wait for a tab switch.
-		filesProvider.revealForUri(vscode.window.activeTextEditor?.document.uri);
-		// ASSUMPTION: linked worktrees share target refs but have their own HEAD. Ask git for
-		// both locations so rebases, fetches and updates from another worktree all refresh the base.
-		try {
-			const [headPath, commonDir] = await Promise.all([
-				runGitQuery(repoRoot, ['rev-parse', '--git-path', 'HEAD']),
-				runGitQuery(repoRoot, ['rev-parse', '--git-common-dir']),
-			]);
-			const absoluteHead = path.resolve(repoRoot, headPath);
-			const patterns = [
-				new vscode.RelativePattern(vscode.Uri.file(path.dirname(absoluteHead)), path.basename(absoluteHead)),
-				new vscode.RelativePattern(vscode.Uri.file(path.resolve(repoRoot, commonDir)), '{refs/**,packed-refs}'),
-			];
-			for (const pattern of patterns) {
-				const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-				watcher.onDidChange(() => onHeadChanged('ref-changed'));
-				watcher.onDidCreate(() => onHeadChanged('ref-created'));
-				watcher.onDidDelete(() => onHeadChanged('ref-deleted'));
-				context.subscriptions.push(watcher);
+			// ASSUMPTION: watches precede captured refs. Initial notifications are covered by the
+			// first resolution unless HEAD/refs change during that resolution; never lose that race.
+			let initializing = true;
+			let comparisonGeneration = 0;
+			let pendingResolve = false;
+			let stopped = false;
+			let watchingRefs = false;
+			let headTimer: NodeJS.Timeout | undefined;
+			let inFlight = false;
+			const onHeadChanged = (reason = 'git-api-state', comparisonChanged = true): void => {
+				if (stopped) { return; }
+				if (reason === 'ref-changed' || reason === 'ref-created' || reason === 'ref-deleted') {
+					comparisonProvider.invalidateBranches();
+				}
+				if (comparisonChanged) { comparisonGeneration++; }
+				pendingResolve ||= comparisonChanged;
+				event('refs.refreshRequested', { reason, coalesced: !!headTimer, inFlight, comparisonChanged, initializing });
+				if (initializing) { return; }
+				if (headTimer) {
+					clearTimeout(headTimer);
+				}
+				headTimer = setTimeout(() => {
+					headTimer = undefined;
+					if (inFlight) {
+						onHeadChanged('retry-in-flight', false);
+						return;
+					}
+					const resolve = pendingResolve;
+					pendingResolve = false;
+					inFlight = true;
+					void (async () => {
+						try {
+							if (resolve) { await active.resolve(); }
+							else { event('refs.resolveSkipped', { reason: 'unchanged-head-and-refs' }); }
+							refreshAll(reason, resolve);
+						} finally {
+							inFlight = false;
+						}
+					})().catch((error) => {
+						log(`Could not refresh repository state: ${errMessage(error)}`);
+						void vscode.window.showWarningMessage('Searchlight: repository refresh failed. Use Refresh to retry.');
+					});
+				}, 250);
+			};
+			subscribe({
+				dispose: () => {
+					stopped = true;
+					if (headTimer) { clearTimeout(headTimer); }
+				}
+			});
+
+			try {
+				if (!repository) { throw new Error('Repository metadata is unavailable.'); }
+				for (const pattern of [
+					new vscode.RelativePattern(vscode.Uri.file(path.dirname(repository.headPath)), '{HEAD,config.worktree}'),
+					new vscode.RelativePattern(vscode.Uri.file(repository.commonDir), '{refs/**,packed-refs,config}'),
+				]) {
+					const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+					watcher.onDidChange(() => onHeadChanged('ref-changed'));
+					watcher.onDidCreate(() => onHeadChanged('ref-created'));
+					watcher.onDidDelete(() => onHeadChanged('ref-deleted'));
+					subscribe(watcher);
+				}
+				watchingRefs = true;
+			} catch (error) {
+				log(`Could not watch comparison refs: ${errMessage(error)}`);
+				void vscode.window.showWarningMessage('Searchlight: ref watching is unavailable. Use Refresh after updating branches.');
 			}
-		} catch (error) {
-			log(`Could not watch comparison refs: ${errMessage(error)}`);
-			void vscode.window.showWarningMessage('Searchlight: ref watching is unavailable. Use Refresh after updating branches.');
-		}
 
-		perf('background init total', tBg);
-		milestone('startup.backgroundComplete');
-	});
+			await gitReady;
+			const repoSub = await trace('startup.gitSubscription', () =>
+				gitApi.onRepoStateChanged(repoRoot, (change) => {
+					// Discovery alone is not a Git mutation. The early filesystem watches cover real changes.
+					if (change === 'opened' && watchingRefs && (initializing || active.headCommit)) { return; }
+					onHeadChanged(change === 'opened' ? 'git-api-opened' : 'git-api-state', change !== 'working-tree');
+				}, (change) => {
+					// API discovery cannot stale a disk catalogue when early watches cover mutations.
+					if (change !== 'opened' || !watchingRefs) { comparisonProvider.invalidateBranches(); }
+				}));
+			if (repoSub) {
+				subscribe(repoSub);
+			}
+			comparisonProvider.invalidateBranches();
+			milestone('startup.repositoryReady');
+			publishRepositoryReady();
+			comparisonProvider.refresh();
+
+			const autoCreateOnEmpty = vscode.workspace.getConfiguration('searchlight').get<boolean>('autoCreateOnEmpty', true);
+			let snapshot: ComparisonSnapshot | undefined;
+			const snapshotGeneration = comparisonGeneration;
+			if (autoCreateOnEmpty && repository && watchingRefs) {
+				try {
+					snapshot = await trace('startup.comparisonSnapshot', async () => {
+						const [head, refs] = await Promise.all([gitApi.getHead(repoRoot), readComparisonRefs(repoRoot)]);
+						return { head, refs };
+					});
+				} catch (error) {
+					log(`Could not share startup Git metadata; resolving directly: ${errMessage(error)}`);
+					event('startup.snapshotUnavailable');
+				}
+			}
+			if (autoCreateOnEmpty) {
+				const tDefaults = now();
+				await active.computeDefaults(snapshotGeneration === comparisonGeneration ? snapshot : undefined);
+				perf('computeDefaults', tDefaults);
+			}
+			const resolutionGeneration = comparisonGeneration;
+			const tResolve = now();
+			await active.resolve(snapshotGeneration === resolutionGeneration ? snapshot : undefined);
+			perf('resolve', tResolve);
+			initializing = false;
+			pendingResolve = false;
+			setComparisonSettled();
+			milestone('startup.comparisonResolved', { outcome: active.baselineError ? 'error' : active.baselineCommit ? 'ready' : 'unselected' });
+			refreshAll('startup');
+			if (comparisonGeneration !== resolutionGeneration) { onHeadChanged('startup-raced'); }
+
+			// Auto-reveal: track the active editor in the Changed Files tree. Reveal-only — it never opens
+			// or closes an editor, so it cannot fight the user's tab focus.
+			subscribe(vscode.window.onDidChangeActiveTextEditor((ed) => filesProvider.revealForUri(ed?.document.uri)));
+			// Reveal whatever is already open, so a file open at activation doesn't wait for a tab switch.
+			filesProvider.revealForUri(vscode.window.activeTextEditor?.document.uri);
+			perf('background init total', tBg);
+			milestone('startup.backgroundComplete');
+		}).catch((error) => {
+			// Failed initialization can be retried; its early watchers must not survive the retry.
+			for (const subscription of startupSubscriptions) { subscription.dispose(); }
+			throw error;
+		});
+	};
 	event('startup.comparisonDeferred');
 	milestone('activation.return');
 }

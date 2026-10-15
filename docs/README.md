@@ -29,6 +29,9 @@ also collapsed and loaded only when expanded. It expands all folders in
 Changed Files initially, and hides resolved threads. Saved VS Code pane layouts and explicit
 Show Resolved choices are preserved. The all-changes diff command remains available in the Command
 Palette, but is no longer a Changed Files toolbar button.
+Short Comparison panes scroll rather than hiding controls. A keyboard-accessible **More below /
+More above** cue reveals overflow; its footer slot stays reserved to avoid moving commit rows.
+Expanded Commits keeps enough space for its toolbar and rows, while collapsed Commits stays lazy.
 
 Changed Files checkmarks certify the complete **saved** file change against the effective baseline.
 Saved edits or changed baseline content automatically uncheck affected files; staging/committing

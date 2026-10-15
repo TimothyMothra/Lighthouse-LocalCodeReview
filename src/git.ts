@@ -10,6 +10,7 @@
 import { exec, execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createHash } from 'crypto';
+import * as path from 'path';
 import { isReviewFilePath } from './reviewModel';
 import { event, trace } from './diagnostics';
 
@@ -28,6 +29,7 @@ const diagnosticOptions = new Set([
 	'--include-root-refs',
 	'--first-parent', '--root', '--diff-merges',
 	'-g', '--contains', '--no-contains',
+	'--git-path', '--git-common-dir',
 ]);
 
 function commandFields(args: string[], execution: 'shell' | 'execFile'): Record<string, string> {
@@ -72,12 +74,26 @@ export async function getGitUserName(cwd: string): Promise<string> {
 
 /** The current branch name (`git rev-parse --abbrev-ref HEAD`), or undefined. */
 export async function getCurrentBranch(cwd: string): Promise<string | undefined> {
-	return git('rev-parse --abbrev-ref HEAD', cwd);
+	return gitv(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
 }
 
 /** The current full commit sha (`git rev-parse HEAD`), or undefined. */
 export async function getCurrentCommit(cwd: string): Promise<string | undefined> {
-	return git('rev-parse HEAD', cwd);
+	return gitv(['rev-parse', 'HEAD'], cwd);
+}
+
+/** One read captures the commit and branch together; a detached HEAD is reported explicitly. */
+export async function getHeadCli(cwd: string): Promise<{ branch?: string; commit?: string; detached: boolean }> {
+	const output = await gitv(['rev-parse', 'HEAD', '--abbrev-ref', 'HEAD'], cwd);
+	if (output === undefined) {
+		event('git.missing', { operation: 'head' });
+		return { detached: false };
+	}
+	const [commit, branch] = output.split(/\r?\n/);
+	if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(commit) || !branch) {
+		throw new Error('Git returned invalid HEAD metadata.');
+	}
+	return { branch: branch === 'HEAD' ? undefined : branch, commit, detached: branch === 'HEAD' };
 }
 
 /** A branch ref discovered via the git CLI. */
@@ -178,6 +194,22 @@ export async function hashGitBlob(cwd: string, oid: string): Promise<string> {
 /** The repository root for `cwd` (`git rev-parse --show-toplevel`), or undefined. */
 export async function getRepoRoot(cwd: string): Promise<string | undefined> {
 	return gitv(['rev-parse', '--show-toplevel'], cwd);
+}
+
+export interface RepositoryInfo {
+	root: string;
+	headPath: string;
+	commonDir: string;
+}
+
+/** Capture worktree-specific HEAD and shared refs with the root probe, before installing watches. */
+export async function getRepositoryInfo(cwd: string): Promise<RepositoryInfo | undefined> {
+	const output = await gitv(['rev-parse', '--show-toplevel', '--git-path', 'HEAD', '--git-common-dir'], cwd);
+	if (output === undefined) { return undefined; }
+	const [root, headPath, commonDir] = output.split(/\r?\n/);
+	if (!root || !headPath || !commonDir) { throw new Error('Git returned invalid repository metadata.'); }
+	// ASSUMPTION: --git-path and --git-common-dir are relative to the queried cwd, not its root.
+	return { root, headPath: path.resolve(cwd, headPath), commonDir: path.resolve(cwd, commonDir) };
 }
 
 let supportsRootRefEnumeration: boolean | undefined;
@@ -450,6 +482,11 @@ const branchRefArgs = [
 	'refs/heads', 'refs/remotes',
 ];
 
+/** A caller may share these captured object IDs within one watched initialization generation. */
+export function readComparisonRefs(cwd: string): Promise<string> {
+	return runGitQuery(cwd, branchRefArgs, 16 * 1024 * 1024);
+}
+
 function parseBranchRefs(out: string): BranchRef[] {
 	return out.split(/\r?\n/).flatMap((line): BranchRef[] => {
 		const [ref, commit, upstream, symbolic] = line.split('\t');
@@ -536,15 +573,15 @@ async function recordedForkTarget(
  * ASSUMPTION: a nearby ancestor tip is useful evidence, not proof of the intended PR target.
  * Bound discovery to 200 commits; moved/deleted targets and ambiguous aliases require manual choice.
  */
-export async function suggestBaseBranch(cwd: string, compare: string): Promise<BaseSuggestion> {
-	const sha = await resolveCommit(cwd, compare);
+export async function suggestBaseBranch(cwd: string, compare: string, refSnapshot?: string, sourceCommit?: string): Promise<BaseSuggestion> {
+	const sha = sourceCommit ?? await resolveCommit(cwd, compare);
 	if (!sha) {
 		throw new Error(`Cannot resolve source ${compare}.`);
 	}
 	const [page, refsResult, fallback] = await Promise.all([
 		commitAncestry(cwd, sha, 200),
-		runGitQuery(cwd, branchRefArgs, 16 * 1024 * 1024),
-		defaultBaseBranch(cwd),
+		refSnapshot === undefined ? readComparisonRefs(cwd) : Promise.resolve(refSnapshot),
+		defaultBaseBranch(cwd, refSnapshot),
 	]);
 	const refs = parseBranchRefs(refsResult);
 	const sourceLocals = refs.filter((ref) =>
@@ -597,7 +634,23 @@ export async function suggestBaseBranch(cwd: string, compare: string): Promise<B
  * prefer a local `main`, else the remote default (origin/HEAD target), else the first branch.
  * Returns a branch name (e.g. 'main' or 'origin/develop'), or undefined when none can be found.
  */
-export async function defaultBaseBranch(cwd: string): Promise<string | undefined> {
+export async function defaultBaseBranch(cwd: string, refSnapshot?: string): Promise<string | undefined> {
+	if (refSnapshot !== undefined) {
+		const refs = refSnapshot.split(/\r?\n/).map((line) => line.split('\t'));
+		if (refs.some(([name]) => name === 'refs/heads/main')) {
+			event('git.defaultBase', { source: 'localDefault', snapshot: true });
+			return 'main';
+		}
+		const originHead = refs.find(([name]) => name === 'refs/remotes/origin/HEAD')?.[3];
+		if (originHead) {
+			event('git.defaultBase', { source: 'remoteDefault', snapshot: true });
+			return originHead.replace(/^refs\/remotes\//, '');
+		}
+		// Keep Git's existing short-ref disambiguation for the uncommon first-branch fallback.
+		const branches = await listBranchesCli(cwd);
+		event('git.defaultBase', { source: branches.length ? 'firstBranch' : 'missing', branchCount: branches.length });
+		return branches[0]?.name;
+	}
 	// Prefer a local `main`.
 	const localMain = await gitv(['rev-parse', '--verify', '--quiet', 'refs/heads/main'], cwd);
 	if (localMain) {

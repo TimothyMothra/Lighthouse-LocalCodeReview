@@ -72,8 +72,9 @@ export async function resolveBaseline(
 	compareCommit: string,
 	pin?: string,
 	query: GitQuery = (args) => runGitQuery(cwd, args),
+	refSnapshot?: string,
 ): Promise<Baseline> {
-	return trace('baseline.resolve', () => resolveBaselineCore(cwd, target, compareCommit, pin, query),
+	return trace('baseline.resolve', () => resolveBaselineCore(cwd, target, compareCommit, pin, query, refSnapshot),
 		{ pinned: !!pin });
 }
 
@@ -83,10 +84,11 @@ async function resolveBaselineCore(
 	compareCommit: string,
 	pin: string | undefined,
 	query: GitQuery,
+	refSnapshot?: string,
 ): Promise<Baseline> {
-	const output = await trace('baseline.refs', () => query([
+	const output = await trace('baseline.refs', () => refSnapshot === undefined ? query([
 		'for-each-ref', '--format=%(refname)\t%(objectname)\t%(upstream)', 'refs/heads', 'refs/remotes',
-	]));
+	]) : Promise.resolve(refSnapshot), { snapshot: refSnapshot !== undefined });
 	const refs: TargetRef[] = output.split(/\r?\n/).filter(Boolean).map((line) => {
 		const [name, commit, upstream = ''] = line.split('\t');
 		return { name, commit, upstream };

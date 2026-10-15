@@ -8,13 +8,31 @@
  */
 
 import * as vscode from 'vscode';
-import { getHead } from './gitApi';
+import { getHead, HeadInfo } from './gitApi';
 import { BaseSuggestion, changedFiles, changedFilesCumulative, ChangedFile, CommitEntry, defaultBaseBranch, logRange, resolveCommit, suggestBaseBranch } from './git';
 import { Baseline, resolveBaseline, resolveBaselinePin } from './baseline';
 import { computeReviewPaths, emptyReview, loadReview } from './reviewStore';
 import { Review } from './reviewModel';
 import { perfCount } from './perf';
 import { event, now, trace } from './diagnostics';
+
+/** Used only by startup while the caller's HEAD/ref watchers still validate its generation. */
+export interface ComparisonSnapshot {
+	head: HeadInfo;
+	refs: string;
+}
+
+function snapshotSource(snapshot: ComparisonSnapshot | undefined, compare: string): string | undefined {
+	const head = snapshot?.head;
+	if (!head?.commit) { return undefined; }
+	if (compare === head.commit) { return head.commit; }
+	// ASSUMPTION: API discovery can lag behind Git. Only reuse a named HEAD when captured refs agree.
+	if (compare === head.branch && snapshot?.refs.split(/\r?\n/).some((line) => {
+		const [name, commit] = line.split('\t');
+		return name === `refs/heads/${compare}` && commit === head.commit;
+	})) { return head.commit; }
+	return undefined;
+}
 
 /** Holds and resolves the active base/compare comparison + its review. */
 export class ActiveComparison {
@@ -91,7 +109,7 @@ export class ActiveComparison {
 		 * Git repository root (cwd for all git operations). Mutable so activation can construct
 		 * `ActiveComparison` synchronously with a `workspaceFolder` placeholder and fill in the real
 		 * root from the background init (getRepoRoot is a slow git spawn we don't want on the
-		 * activation critical path — see the environmental-AV note in extension.ts).
+		 * activation critical path — see the startup-contention note in extension.ts).
 		 */
 		public repoRootFsPath: string,
 		private readonly workspaceState: vscode.Memento,
@@ -130,12 +148,12 @@ export class ActiveComparison {
 	 * Compare follows HEAD; base uses conservative ancestor-tip evidence, then the repository default.
 	 * Suggestions are explained inline, never in a popup.
 	 */
-	async computeDefaults(): Promise<void> {
-		return trace('comparison.defaults', () => this.computeDefaultsCore());
+	async computeDefaults(snapshot?: ComparisonSnapshot): Promise<void> {
+		return trace('comparison.defaults', () => this.computeDefaultsCore(snapshot));
 	}
 
-	private async computeDefaultsCore(): Promise<void> {
-		const head = await getHead(this.repoRootFsPath);
+	private async computeDefaultsCore(snapshot?: ComparisonSnapshot): Promise<void> {
+		const head = snapshot?.head ?? await getHead(this.repoRootFsPath);
 		this.headBranch = head.detached ? undefined : head.branch;
 		this.headCommit = head.commit;
 
@@ -154,7 +172,7 @@ export class ActiveComparison {
 				this.baseExplicit = true;
 				this.defaultBaseCompare = compare;
 			} else {
-				const suggestion = await this.automaticBase(compare);
+				const suggestion = await this.automaticBase(compare, snapshot);
 				// ASSUMPTION: explicit choices win over discovery that finishes afterward.
 				if (!this.baseExplicit && this.base === undefined && this.compare === compare) {
 					this.base = suggestion.branch;
@@ -165,9 +183,10 @@ export class ActiveComparison {
 		}
 	}
 
-	private async automaticBase(compare: string): Promise<BaseSuggestion> {
+	private async automaticBase(compare: string, snapshot?: ComparisonSnapshot): Promise<BaseSuggestion> {
 		try {
-			return await trace('comparison.targetDiscovery', () => suggestBaseBranch(this.repoRootFsPath, compare));
+			return await trace('comparison.targetDiscovery', () =>
+				suggestBaseBranch(this.repoRootFsPath, compare, snapshot?.refs, snapshotSource(snapshot, compare)));
 		} catch (error) {
 			console.error('[searchlight] Target discovery failed:', error);
 			return {
@@ -182,17 +201,17 @@ export class ActiveComparison {
 	 * storage paths, and load an existing `comments.json` (or build an in-memory review that is NOT
 	 * yet written to disk).
 	 */
-	async resolve(): Promise<void> {
-		return trace('comparison.resolve', () => this.resolveCore());
+	async resolve(snapshot?: ComparisonSnapshot): Promise<void> {
+		return trace('comparison.resolve', () => this.resolveCore(snapshot));
 	}
 
-	private async resolveCore(): Promise<void> {
+	private async resolveCore(snapshot?: ComparisonSnapshot): Promise<void> {
 		const version = ++this.resolveVersion;
 		const cacheGeneration = this.automaticCacheGeneration;
 		// HEAD must be resolved BEFORE the commits: auto-follow below can change `compare`, and
 		// resolving `compareCommit` from a stale branch name would show the new branch with the old
 		// commit. Apply the resolved comparison atomically after all queries complete.
-		const head = await getHead(this.repoRootFsPath);
+		const head = snapshot?.head ?? await getHead(this.repoRootFsPath);
 		if (version !== this.resolveVersion) { return; }
 		const headBranch = head.detached ? undefined : head.branch;
 		let base = this.base;
@@ -217,7 +236,7 @@ export class ActiveComparison {
 		// Re-suggest only when the source changes, not on every commit or working-tree edit.
 		// An unset base stays unset when autoCreateOnEmpty is disabled.
 		if (!baseExplicit && base !== undefined && compare && defaultBaseCompare !== undefined && compare !== defaultBaseCompare) {
-			const suggestion = await this.automaticBase(compare);
+			const suggestion = await this.automaticBase(compare, snapshot);
 			base = suggestion.branch;
 			baseExplanation = suggestion.explanation;
 			defaultBaseCompare = compare;
@@ -242,7 +261,7 @@ export class ActiveComparison {
 			return;
 		}
 
-		const compareCommit = await resolveCommit(this.repoRootFsPath, compare);
+		const compareCommit = snapshotSource(snapshot, compare) ?? await resolveCommit(this.repoRootFsPath, compare);
 		const pin = this.workspaceState.get<string>(this.pinKey(base, compare));
 		let baseline: Baseline | undefined;
 		let baselineError: string | undefined;
@@ -250,7 +269,9 @@ export class ActiveComparison {
 			if (!compareCommit) {
 				throw new Error(`Compare ref '${compare}' cannot be resolved to a commit.`);
 			}
-			baseline = await resolveBaseline(this.repoRootFsPath, base, compareCommit, pin);
+			baseline = snapshot
+				? await resolveBaseline(this.repoRootFsPath, base, compareCommit, pin, undefined, snapshot.refs)
+				: await resolveBaseline(this.repoRootFsPath, base, compareCommit, pin);
 		} catch (error) {
 			// Resolution failures are visible in Comparison; never substitute the target tip.
 			baselineError = error instanceof Error ? error.message : String(error);
