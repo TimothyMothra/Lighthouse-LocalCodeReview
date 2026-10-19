@@ -2,11 +2,13 @@
 
 A **local-only VS Code extension** for reviewing your own git branch diffs the way you'd review a
 pull request — native inline comment threads, a three-view "PR panel", `/tag` classification, and a
-one-click **Ask Copilot** round-trip — all offline, with every comment stored as plain JSON on disk.
+one-click **Ask Copilot** round-trip, with every comment stored as plain JSON on disk.
+Core review workflows work offline; optional Copilot and explicit Git network actions can use
+the network.
 
 > **Status:** local-only, single-developer tool. The extension **never calls a language model
 > directly** — all AI work happens through an external `copilot` CLI shell-out. Reviews live under
-> `.vscode/lighthouse-reviews/` (no server, no database, no network), a superset of — and never a
+> `.vscode/lighthouse-reviews/` (no review server or database), a superset of — and never a
 > clobber of — the original `Gururagavendra.local-pr-review` format.
 
 ## Screenshot
@@ -25,9 +27,12 @@ widget-service code and review comments — see [`DEMO.md`](./DEMO.md)._
     **Review** shows `git log base..compare`. Right-click any
     commit and choose **Set as Base** to pin its SHA, **Copy Commit SHA**, or **Open Commit Diff**.
     **↶ Unpin** beside Base returns to automatic branch/shared-ancestor selection.
-  - **Changed Files** — a hierarchical folder tree of `git diff base...compare` with per-file
-    reviewed checkboxes; click opens a native diff.
-  - **Threads** — every comment thread for the active review; click jumps to `file:line`.
+  - **Changed Files** — a hierarchical folder tree of changes from the effective baseline to the
+    source, with per-file reviewed checkboxes; click opens a native diff. The default cumulative
+    mode includes saved working-tree and untracked changes when the source is checked out.
+  - **Threads** — inline and review-wide discussions for the active review. Code-linked rows
+    navigate to code; **Read** opens the complete discussion, and **New Thread** starts a
+    review-wide discussion without a code location.
 - **Native inline comment threads** — comments render as first-class VS Code `CommentController`
   threads in the editor gutter, with reply, resolve / unresolve, and copy commands.
 - **`/tag` classification** — type `/` in any comment box for autocomplete over the tag set; tags
@@ -41,24 +46,53 @@ widget-service code and review comments — see [`DEMO.md`](./DEMO.md)._
 
 ## Quick start
 
-Build and install into your local VS Code from source:
+The extension is not on the Marketplace yet. Build and install into your local VS Code from
+source. Local development is Windows-first and requires Node.js/npm compatible with the locked
+tooling, PowerShell (`pwsh` for the commands below), and the **`code` CLI** on `PATH`.
 
 ```powershell
-# 1. Install dependencies and compile TypeScript -> out/
-npm install
-npm run compile
+# From the repo root, set up dependencies once (or after dependency changes).
+npm ci
 
-# 2. Package the extension into lighthouse-0.0.1.vsix (gitignored)
-npx @vscode/vsce package
-
-# 3. Build + install into local VS Code in one step
-pwsh -File scripts/deploy-local.ps1
-#    (or reinstall the existing .vsix without rebuilding:)
-pwsh -File scripts/deploy-local.ps1 -InstallOnly
+# Build, package and install into local VS Code.
+pwsh -File .\scripts\deploy-local.ps1
 ```
 
-Then run **Developer: Reload Window** in VS Code to pick up the build. Requires **Node.js** and the
-**`code` CLI** on `PATH`.
+For later source edits, rerun only the deploy command, then use **Developer: Reload Window** in
+VS Code. The helper reads the package name/version from `package.json`; no script edit is needed
+after a version change. To reinstall the existing VSIX without rebuilding:
+
+```powershell
+pwsh -File .\scripts\deploy-local.ps1 -InstallOnly
+```
+
+For debugging without installation, select **Run Extension** in VS Code and press F5. The
+checked-in launch configuration compiles and opens an Extension Development Host.
+See [engineering.md](./docs/engineering.md) for compile-only, package-only and test commands.
+
+Core review requires VS Code and Git on `PATH`; it does not require Copilot or a separate
+Node.js installation when using an already-built VSIX. Ask Copilot additionally requires an
+installed, authenticated `copilot` CLI and the permissions needed for the requested actions.
+The review-store location assumes a single workspace folder; other platforms and remote/virtual
+workspaces are not established support claims.
+
+## AI tools and review files
+
+The tool-independent [comment-file schema](./docs/data-model.md) documents how to read
+`.vscode/lighthouse-reviews/**/comments.json`, including v1/v2 compatibility, replies, authors
+and durable thread IDs. Supply that documentation explicitly to another AI tool before asking
+it to edit reviews.
+
+The current VSIX does **not** bundle a complete AI instruction document or install instructions
+into a reviewed repository. Ask Copilot sends a short schema hint and assumes additional schema
+guidance is supplied separately. The repo's
+[Copilot instructions](./.github/copilot-instructions.md) are for developing Lighthouse itself,
+not an agent contract distributed to extension users.
+
+Performance and feature-usage logging are local and enabled by default; there is no remote
+telemetry upload. See [startup diagnostics](./docs/startup-diagnostics.md) and
+[local feature usage](./docs/usage-diagnostics.md) for collected fields, export behavior and the
+`lighthouse.perfLogging` / `lighthouse.usageLogging` settings.
 
 ## Tags
 

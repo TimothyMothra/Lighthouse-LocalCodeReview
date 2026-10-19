@@ -1,8 +1,8 @@
 # Lighthouse: Local Code Review — Knowledge Base
 
 **Lighthouse: Local Code Review** is a VS Code extension for reviewing local git branch diffs the
-way you'd review a pull request — but entirely offline, with review comments stored as plain JSON on
-disk. It adds a three-view "PR panel" (Comparison with commits, Changed Files, Threads), native
+way you'd review a pull request — with offline core review and review comments stored as plain JSON
+on disk. It adds a three-view "PR panel" (Comparison with commits, Changed Files, Threads), native
 inline comment threads, `/tag` classification, and a one-click **Ask Copilot** bridge that hands a
 review thread to the `copilot` CLI so an agent can reply in-thread and stamp its identity.
 
@@ -57,7 +57,8 @@ Existing `conversation`-named command IDs, settings and storage remain compatibl
   **external** Copilot agent (the `copilot` CLI) *reads* that JSON, replies in-thread, and stamps an
   identity block. The extension is never an AI client.
 - **Everything is a file.** A "review" is a `comments.json` under `.vscode/lighthouse-reviews/`.
-  There is no server, database, or network dependency.
+  There is no review server, database, or core-review network dependency. Optional Copilot and
+  explicit Git network actions are separate.
 - **A comparison = base + compare.** `base` is the TARGET branch or fixed commit, `compare` is the SOURCE branch
   under review. A separate **effective baseline** is inferred from local/upstream shared ancestry
   or fixed to an explicit ancestor commit. Comparison keeps the approved Base/Compare selectors;
@@ -72,10 +73,16 @@ Existing `conversation`-named command IDs, settings and storage remain compatibl
 ## Fastest commands
 
 ```powershell
-# From the repo root after the checkout rename: C:\REPOS\lighthouse-localcodereview\main
-npm install
-npm run compile                 # tsc -> out/
-npx @vscode/vsce package        # (re)build the gitignored lighthouse-0.0.1.vsix
-scripts\deploy-local.ps1        # sideload timothymothra.lighthouse@0.0.1 into your VS Code
-# then: Reload Window
+# From the repo root: set up dependencies once, or after dependency changes.
+npm ci
+pwsh -File .\scripts\deploy-local.ps1   # compile, package and install the manifest's version
+# Then: Developer: Reload Window
 ```
+
+For subsequent source edits, rerun only the deploy command. Use `-InstallOnly` to reinstall the
+existing VSIX without rebuilding, or F5 with **Run Extension** to debug without installing.
+See [engineering.md](engineering.md) for prerequisites and individual build/test commands.
+
+The schema documentation is available in this source repository, but neither `docs` nor the
+contributor `.github` instructions ship in the VSIX. The current Ask-Copilot prompt assumes
+schema guidance is supplied separately; it does not register instructions with other AI tools.

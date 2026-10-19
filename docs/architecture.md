@@ -342,9 +342,15 @@ opens an integrated terminal "Lighthouse · Copilot" with cwd = reviewDir
 terminal.sendText(<cliPath> <args> <prompt>)
 ```
 
-The agent already understands the schema (via a personal Copilot instruction file). It edits
-`comments.json`; the file watcher then reloads and re-renders the thread with the identity-stamped
-reply. **No LM API, no keys, no in-extension model call.**
+The current implementation assumes the agent understands the schema via separately supplied
+guidance (the author's setup uses a personal Copilot instruction file). The complete format is
+documented in `docs/data-model.md`, but `docs` and contributor `.github` instructions are excluded
+from the VSIX. The extension does not bundle a complete agent instruction document, register an
+instruction provider, or install instructions into reviewed repositories.
+
+The agent edits `comments.json`; the file watcher then reloads and re-renders the thread with the
+identity-stamped reply. **No LM API, no keys, no in-extension model call.** A self-contained,
+packaged agent contract remains publication-readiness work.
 
 ## 8. Data flow
 
@@ -380,5 +386,6 @@ reply. **No LM API, no keys, no in-extension model call.**
 - **Per-row Pull/Update is FF-only.** It fetches and fast-forwards a stale local branch to its
   upstream; if not fast-forwardable it warns and does nothing (never merges or rebases). No push.
 - **Single workspace folder assumed** for the review store location.
-- **The agent round-trip requires the personal instruction file** to also read
-  `.vscode/lighthouse-reviews/` (a superset of the original `.vscode/local-reviews/` guidance).
+- **The agent round-trip assumes separately supplied schema guidance** for
+  `.vscode/lighthouse-reviews/` (a superset of the original `.vscode/local-reviews/` guidance);
+  the short launch prompt is not a complete, bundled instruction document.

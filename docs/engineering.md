@@ -1,18 +1,28 @@
 # Engineering
 
-How to build, package, deploy, and verify Lighthouse: Local Code Review. All commands assume the
-repo root `C:\REPOS\lighthouse-localcodereview\main` after the checkout rename.
+How to build, package, deploy, and verify Lighthouse: Local Code Review. Commands run from the
+repository root; no particular checkout path is required.
 
 ## 1. Prerequisites
 
-- **Node.js** 20.x (matches `@types/node ^20.11`).
-- **VS Code** ≥ 1.85 (`engines.vscode ^1.85.0`).
+- **Node.js/npm** compatible with the locked development tooling; prefer a maintained Node LTS.
+  The lockfile includes tooling requiring at least Node 20.18.1. `@types/node` is a declaration
+  package, not a Node runtime pin.
+- **VS Code** (the manifest declares `engines.vscode ^1.85.0`; minimum-version verification is
+  still release-readiness work).
+- **PowerShell** for `scripts\deploy-local.ps1` (requires 5.1+, examples use `pwsh`).
+- **`code` CLI** on `PATH` for local installation. The helper also checks the standard
+  `C:\Program Files\Microsoft VS Code\bin\code.cmd` location.
 - **`@vscode/vsce`** for packaging (a dev dependency; no global install needed).
 - **git** on `PATH`.
 
 The conversation page uses `markdown-it` at runtime for safe Markdown formatting. It is loaded
 lazily, not on the startup critical path. VSCE includes production dependencies; do not exclude
 all of `node_modules` from the VSIX.
+
+Node.js/npm and VSCE are development/package tools, not separate prerequisites for using an
+already-built VSIX. Core review does not require Copilot; Ask Copilot separately requires the
+installed, authenticated CLI, appropriate tool permissions, and schema guidance.
 
 ## 2. Layout
 
@@ -30,28 +40,49 @@ all of `node_modules` from the VSIX.
 
 ## 3. Build / package / deploy
 
+### Normal local-development loop
+
 ```powershell
-# 1. Compile TypeScript -> out/
-npm run compile
-npm test                        # compile + built-in Node comparison regression tests
-
-# 2. Package the VSIX (rebuilds the gitignored lighthouse-0.0.1.vsix, ~26 files / ~65 KB)
-npx @vscode/vsce package
-
-# 3. Sideload into the host VS Code (installs timothymothra.lighthouse@0.0.1)
-scripts\deploy-local.ps1
+npm ci                                  # first checkout, or after dependency changes
+pwsh -File .\scripts\deploy-local.ps1     # build + package + install
+# Then: Developer: Reload Window in the target VS Code
 ```
 
-- `deploy-local.ps1` emits a benign `DEP0169` Node deprecation warning — ignore it.
-- **Never commit `lighthouse-0.0.1.vsix`** — it is gitignored build output and is rebuilt on every
-  package.
-- After deploying, **Reload Window** in the target VS Code to pick up the new build.
+For subsequent source edits, rerun only the deploy command. The helper uses the manifest's
+`name` and `version` to select `<name>-<version>.vsix`; do not edit it for every version bump.
+It resolves the repository relative to its own script location, so a full script path works
+from another working directory.
+
+Reinstall the existing artifact without compiling or packaging:
+
+```powershell
+pwsh -File .\scripts\deploy-local.ps1 -InstallOnly
+```
+
+For debugging without modifying the installed extension, choose **Run Extension** and press F5.
+`.vscode\launch.json` runs the `npm: compile` task and opens an Extension Development Host.
+
+### Individual operations
+
+These are alternatives for the requested operation, not extra prerequisites before deploying:
+
+```powershell
+npm run compile                 # TypeScript -> out/ only
+npx @vscode/vsce package         # compile via vscode:prepublish, then package only
+npm test                        # when requested: compile + Node regression suites
+```
+
+- **Never commit `*.vsix`** — these are gitignored build outputs.
+- Local installation uses `code --install-extension ... --force`; it does not publish to the
+  Marketplace. A build/package request alone does not authorize installation or reload.
+- Installing a VSIX is not proof that the target window is running it. Reload that window to
+  pick up the build.
 
 To confirm the install:
 
 ```powershell
 code --list-extensions --show-versions | Select-String lighthouse
-# -> timothymothra.lighthouse@0.0.1
+# Compare the reported timothymothra.lighthouse version with package.json.
 ```
 
 ### Comparison regression tests
@@ -133,15 +164,15 @@ comment or a stale-branch update can be exercised end-to-end without touching th
 - **Linear history on `main`.** No merges, no feature-branch PRs for routine work.
 - Every commit carries the trailer:
   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
-- **Never** stage or commit `lighthouse-0.0.1.vsix` (gitignored).
+- **Never** stage or commit `*.vsix` (gitignored).
 - No push / PR without explicit instruction.
 
 ## 8. Dependencies & pins
 
 | Package | Version | Why |
 |---------|---------|-----|
-| `@types/node` | `^20.11` | matches Node 20 runtime |
-| `@types/vscode` | `^1.85` | matches `engines.vscode` floor |
+| `@types/node` | `^20.11` | development Node API declarations, not a runtime pin |
+| `@types/vscode` | `^1.85` | declaration range; the lockfile can resolve newer APIs than the declared engine floor |
 | `@vscode/vsce` | `^3.9.2` | packaging |
 | `typescript` | `^5.4` | compiler |
 
@@ -198,8 +229,10 @@ are required.
 
 ## 9. Known constraints
 
-- Windows-first tooling: `deploy-local.ps1` and the VM harness are PowerShell; the extension itself
-  is cross-platform.
+- Windows-first development tooling: `deploy-local.ps1` and the VM harness are PowerShell.
+  Cross-platform and remote/virtual-workspace support have not been established by a release matrix.
 - The Ask-Copilot round-trip depends on the `copilot` CLI being installed and on the personal
-  instruction file that teaches the agent to read `.vscode/lighthouse-reviews/`.
+  instruction guidance that teaches the agent to read `.vscode/lighthouse-reviews/`. The source
+  schema is in `docs\data-model.md`, but `docs` and contributor `.github` instructions are excluded
+  from the VSIX; no complete agent instruction document is bundled or installed into reviewed repos.
 - Single workspace folder is assumed for the review store.

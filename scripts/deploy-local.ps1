@@ -4,8 +4,9 @@
     Build the Lighthouse extension and install it into local (host) VS Code.
 
 .DESCRIPTION
-    Compiles + packages the extension into lighthouse-0.0.1.vsix (at repo root,
-    already gitignored) and installs it with `code --install-extension ... --force`.
+    Compiles + packages the extension into <name>-<version>.vsix using package.json
+    (at repo root, already gitignored) and installs it with
+    `code --install-extension ... --force`.
 
 .PARAMETER InstallOnly
     Skip compile + package and just (re)install the existing .vsix. Use this for a
@@ -24,7 +25,12 @@ $ErrorActionPreference = 'Stop'
 
 # Repo root = parent of this script's directory, so cwd doesn't matter.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$vsix = Join-Path $repoRoot 'lighthouse-0.0.1.vsix'
+$manifest = Get-Content -LiteralPath (Join-Path $repoRoot 'package.json') -Raw | ConvertFrom-Json
+if ([string]::IsNullOrWhiteSpace($manifest.name) -or [string]::IsNullOrWhiteSpace($manifest.version)) {
+    throw 'package.json must contain a nonempty name and version to locate the VSIX.'
+}
+# ASSUMPTION: local packaging uses VSCE's default, untargeted <name>-<version>.vsix filename.
+$vsix = Join-Path $repoRoot ('{0}-{1}.vsix' -f $manifest.name, $manifest.version)
 
 Push-Location $repoRoot
 try {
