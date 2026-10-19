@@ -23,7 +23,7 @@ function reviewFixture() {
 	return {
 		root,
 		review: {
-			version: 2, sourceFile: path.join(root, '.vscode', 'searchlight-reviews', 'feature_main', 'comments.json'),
+			version: 2, sourceFile: path.join(root, '.vscode', 'lighthouse-reviews', 'feature_main', 'comments.json'),
 			sourceBranch: 'feature', targetBranch: 'main',
 			threads: [{
 				id: 'thread-1', seq: 3, filePath: 'deleted-never-committed.ts', startLine: 12, endLine: 12,
@@ -75,7 +75,7 @@ function providerFixture() {
 			workspaceFolders: [{ uri: uri('file', fixture.root) }],
 			onDidCloseTextDocument: (handler) => { closedHandlers.add(handler); return { dispose: () => closedHandlers.delete(handler) }; },
 			openTextDocument: async (uri) => {
-				assert.equal(uri.scheme, 'searchlight-conversation', 'opening a transcript must not open the code file');
+				assert.equal(uri.scheme, 'lighthouse-conversation', 'opening a transcript must not open the code file');
 				const text = await provider.provideTextDocumentContent(uri);
 				return { uri, getText: () => text };
 			},
@@ -100,7 +100,7 @@ test('conversation tabs read only saved review data, refresh on replies, and pre
 		await f.provider.open(conversationTarget(f.review.sourceFile, f.review.threads[0], 0));
 		const { document, options } = f.shown[0];
 		assert.equal(options.preview, false);
-		assert.equal(classifyEditorInput({ uri: document.uri }), 'searchlight-conversation');
+		assert.equal(classifyEditorInput({ uri: document.uri }), 'lighthouse-conversation');
 		assert.ok(document.getText().includes('Final recommendation.'));
 		assert.deepEqual(f.loads, [f.review.sourceFile]);
 		const changed = [];
@@ -123,7 +123,7 @@ test('stable IDs never fall back to another thread, and identical IDs in differe
 	try {
 		const originalTarget = conversationTarget(f.review.sourceFile, f.review.threads[0], 0);
 		await f.provider.open(originalTarget);
-		f.review.sourceFile = path.join(f.root, '.vscode', 'searchlight-reviews', 'other_main', 'comments.json');
+		f.review.sourceFile = path.join(f.root, '.vscode', 'lighthouse-reviews', 'other_main', 'comments.json');
 		f.review.threads[0].comments[0].body = 'Different review';
 		await f.provider.open(conversationTarget(f.review.sourceFile, f.review.threads[0], 0));
 		assert.notEqual(f.shown[0].document.uri.toString(), f.shown[1].document.uri.toString());
@@ -165,7 +165,7 @@ test('invalid or out-of-workspace conversation references are rejected before an
 test('flat review files discovered directly under the review store can also be read', async () => {
 	const f = providerFixture();
 	try {
-		f.review.sourceFile = path.join(f.root, '.vscode', 'searchlight-reviews', 'comments.json');
+		f.review.sourceFile = path.join(f.root, '.vscode', 'lighthouse-reviews', 'comments.json');
 		await f.provider.open(conversationTarget(f.review.sourceFile, f.review.threads[0], 0));
 		assert.ok(f.shown[0].document.getText().includes('Final recommendation.'));
 	} finally { f.provider.dispose(); }

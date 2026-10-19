@@ -120,7 +120,7 @@ test('Markdown renders structure and code without executable HTML, command links
 	assert.ok(!html.includes('<img'));
 	assert.ok(!html.includes('href="javascript:'));
 	assert.match(html, /Image omitted/);
-	assert.equal(classifyEditorInput({ viewType: 'searchlight.conversationPage' }), 'searchlight-conversation');
+	assert.equal(classifyEditorInput({ viewType: 'lighthouse.conversationPage' }), 'lighthouse-conversation');
 });
 
 test('opening a draft never writes; posting creates a review-wide conversation and asks Copilot only explicitly', async () => {
@@ -376,6 +376,6 @@ test('thread-page buttons have fixed decorative icons with visible labels and co
 	const thread = f.store.addGeneralThread(f.review, 'Question', f.store.humanAuthor('Tester'));
 	assert.equal((await buildConversationPageData(f.review, thread)).title, 'Thread #01');
 	const manifest = require('../package.json');
-	assert.equal(manifest.contributes.views.searchlight.find((view) => view.id === 'searchlight.conversations').name, 'Threads');
-	assert.equal(manifest.contributes.commands.find((command) => command.command === 'searchlight.newConversation').title, 'Searchlight: New Thread');
+	assert.equal(manifest.contributes.views.lighthouse.find((view) => view.id === 'lighthouse.conversations').name, 'Threads');
+	assert.equal(manifest.contributes.commands.find((command) => command.command === 'lighthouse.newConversation').title, 'Lighthouse: New Thread');
 });

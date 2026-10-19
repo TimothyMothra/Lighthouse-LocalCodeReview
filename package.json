@@ -1,6 +1,6 @@
 {
-  "name": "searchlight",
-  "displayName": "Searchlight: Local Code Review",
+  "name": "lighthouse",
+  "displayName": "Lighthouse: Local Code Review",
   "description": "Local-only code review with reviews, threads, and Copilot-ready comment schema.",
   "version": "0.0.1",
   "publisher": "TimothyMothra",
@@ -8,7 +8,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TimothyMothra/Searchlight-LocalCodeReview.git"
+    "url": "https://github.com/TimothyMothra/Lighthouse-LocalCodeReview.git"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -18,8 +18,8 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onWebviewPanel:searchlight.conversationPage",
-    "workspaceContains:.vscode/searchlight-reviews/**/comments.json"
+    "onWebviewPanel:lighthouse.conversationPage",
+    "workspaceContains:.vscode/lighthouse-reviews/**/comments.json"
   ],
   "main": "./out/extension.js",
   "capabilities": {
@@ -31,261 +31,261 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "searchlight",
-          "title": "Searchlight",
-          "icon": "media/searchlight.svg"
+          "id": "lighthouse",
+          "title": "Lighthouse",
+          "icon": "media/lighthouse.svg"
         }
       ]
     },
     "views": {
-      "searchlight": [
+      "lighthouse": [
         {
-          "id": "searchlight.comparison",
+          "id": "lighthouse.comparison",
           "name": "Comparison",
           "type": "webview",
           "visibility": "collapsed",
-          "icon": "media/searchlight.svg",
+          "icon": "media/lighthouse.svg",
           "initialSize": 450
         },
         {
-          "id": "searchlight.files",
+          "id": "lighthouse.files",
           "name": "Changed Files",
           "type": "webview",
-          "icon": "media/searchlight.svg",
+          "icon": "media/lighthouse.svg",
           "initialSize": 400
         },
         {
-          "id": "searchlight.conversations",
+          "id": "lighthouse.conversations",
           "name": "Threads",
           "type": "webview",
-          "icon": "media/searchlight.svg",
+          "icon": "media/lighthouse.svg",
           "initialSize": 200
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "searchlight.files",
+        "view": "lighthouse.files",
         "contents": "No changed files between base and compare."
       },
       {
-        "view": "searchlight.conversations",
+        "view": "lighthouse.conversations",
         "contents": "No threads yet. Start a review-wide thread or add a comment to a changed file."
       }
     ],
     "commands": [
       {
-        "command": "searchlight.newConversation",
-        "title": "Searchlight: New Thread",
+        "command": "lighthouse.newConversation",
+        "title": "Lighthouse: New Thread",
         "icon": "$(add)"
       },
       {
-        "command": "searchlight.viewConversation",
-        "title": "Searchlight: Read Thread"
+        "command": "lighthouse.viewConversation",
+        "title": "Lighthouse: Read Thread"
       },
       {
-        "command": "searchlight.exportStartupDiagnostics",
-        "title": "Searchlight: Export Startup Diagnostics"
+        "command": "lighthouse.exportStartupDiagnostics",
+        "title": "Lighthouse: Export Startup Diagnostics"
       },
       {
-        "command": "searchlight.refresh",
-        "title": "Searchlight: Refresh Local Reviews",
+        "command": "lighthouse.refresh",
+        "title": "Lighthouse: Refresh Local Reviews",
         "icon": "$(refresh)"
       },
       {
-        "command": "searchlight.createOrReply",
-        "title": "Searchlight: Add Comment / Reply",
+        "command": "lighthouse.createOrReply",
+        "title": "Lighthouse: Add Comment / Reply",
         "icon": "$(comment)"
       },
       {
-        "command": "searchlight.toggleThreadResolved",
-        "title": "Searchlight: Toggle Resolved",
+        "command": "lighthouse.toggleThreadResolved",
+        "title": "Lighthouse: Toggle Resolved",
         "icon": "$(check)"
       },
       {
-        "command": "searchlight.resolveThread",
-        "title": "Searchlight: Resolve Thread",
+        "command": "lighthouse.resolveThread",
+        "title": "Lighthouse: Resolve Thread",
         "icon": "$(check)"
       },
       {
-        "command": "searchlight.unresolveThread",
-        "title": "Searchlight: Reopen Thread",
+        "command": "lighthouse.unresolveThread",
+        "title": "Lighthouse: Reopen Thread",
         "icon": "$(issue-reopened)"
       },
       {
-        "command": "searchlight.resolveThreadNode",
-        "title": "Searchlight: Resolve Thread",
+        "command": "lighthouse.resolveThreadNode",
+        "title": "Lighthouse: Resolve Thread",
         "icon": "$(check)"
       },
       {
-        "command": "searchlight.unresolveThreadNode",
-        "title": "Searchlight: Reopen Thread",
+        "command": "lighthouse.unresolveThreadNode",
+        "title": "Lighthouse: Reopen Thread",
         "icon": "$(issue-reopened)"
       },
       {
-        "command": "searchlight.askCopilotThread",
-        "title": "Searchlight: Ask Copilot to Review Thread",
+        "command": "lighthouse.askCopilotThread",
+        "title": "Lighthouse: Ask Copilot to Review Thread",
         "icon": "$(hubot)"
       },
       {
-        "command": "searchlight.askCopilotReview",
-        "title": "Searchlight: Ask Copilot to Review (All Threads)",
+        "command": "lighthouse.askCopilotReview",
+        "title": "Lighthouse: Ask Copilot to Review (All Threads)",
         "icon": "$(hubot)"
       },
       {
-        "command": "searchlight.copyCommitId",
-        "title": "Searchlight: Copy Commit Id"
+        "command": "lighthouse.copyCommitId",
+        "title": "Lighthouse: Copy Commit Id"
       },
       {
-        "command": "searchlight.copyBranchName",
-        "title": "Searchlight: Copy Branch Name"
+        "command": "lighthouse.copyBranchName",
+        "title": "Lighthouse: Copy Branch Name"
       },
       {
-        "command": "searchlight.copyDirPath",
-        "title": "Searchlight: Copy Review Directory Path"
+        "command": "lighthouse.copyDirPath",
+        "title": "Lighthouse: Copy Review Directory Path"
       },
       {
-        "command": "searchlight.pickBranches",
-        "title": "Searchlight: Pick Source/Target Branches",
+        "command": "lighthouse.pickBranches",
+        "title": "Lighthouse: Pick Source/Target Branches",
         "icon": "$(git-branch)"
       },
       {
-        "command": "searchlight.switchReview",
-        "title": "Searchlight: Switch Active Review",
+        "command": "lighthouse.switchReview",
+        "title": "Lighthouse: Switch Active Review",
         "icon": "$(arrow-swap)"
       },
       {
-        "command": "searchlight.openDirectory",
-        "title": "Searchlight: Open Branch Directory",
+        "command": "lighthouse.openDirectory",
+        "title": "Lighthouse: Open Branch Directory",
         "icon": "$(folder-opened)"
       },
       {
-        "command": "searchlight.gitPull",
-        "title": "Searchlight: Git Pull",
+        "command": "lighthouse.gitPull",
+        "title": "Lighthouse: Git Pull",
         "icon": "$(arrow-down)"
       },
       {
-        "command": "searchlight.gitPush",
-        "title": "Searchlight: Git Push",
+        "command": "lighthouse.gitPush",
+        "title": "Lighthouse: Git Push",
         "icon": "$(arrow-up)"
       },
       {
-        "command": "searchlight.openTerminalHere",
-        "title": "Searchlight: Open Terminal Here",
+        "command": "lighthouse.openTerminalHere",
+        "title": "Lighthouse: Open Terminal Here",
         "icon": "$(terminal)"
       },
       {
-        "command": "searchlight.pickBase",
-        "title": "Searchlight: Pick Base Branch",
+        "command": "lighthouse.pickBase",
+        "title": "Lighthouse: Pick Base Branch",
         "icon": "$(edit)"
       },
       {
-        "command": "searchlight.pickCompare",
-        "title": "Searchlight: Pick Compare Branch",
+        "command": "lighthouse.pickCompare",
+        "title": "Lighthouse: Pick Compare Branch",
         "icon": "$(edit)"
       },
       {
-        "command": "searchlight.swapBranches",
-        "title": "Searchlight: Swap Base/Compare",
+        "command": "lighthouse.swapBranches",
+        "title": "Lighthouse: Swap Base/Compare",
         "icon": "$(arrow-swap)"
       },
       {
-        "command": "searchlight.refreshAll",
-        "title": "Searchlight: Refresh",
+        "command": "lighthouse.refreshAll",
+        "title": "Lighthouse: Refresh",
         "icon": "$(refresh)"
       },
       {
-        "command": "searchlight.openFileDiff",
-        "title": "Searchlight: Open File Diff"
+        "command": "lighthouse.openFileDiff",
+        "title": "Lighthouse: Open File Diff"
       },
       {
-        "command": "searchlight.openCumulativeFileDiff",
-        "title": "Searchlight: Open Cumulative File Diff"
+        "command": "lighthouse.openCumulativeFileDiff",
+        "title": "Lighthouse: Open Cumulative File Diff"
       },
       {
-        "command": "searchlight.copyCommitSha",
-        "title": "Searchlight: Copy Commit SHA",
+        "command": "lighthouse.copyCommitSha",
+        "title": "Lighthouse: Copy Commit SHA",
         "icon": "$(copy)"
       },
       {
-        "command": "searchlight.updateStaleBranch",
-        "title": "Searchlight: Update Stale Branch (Fast-Forward)",
+        "command": "lighthouse.updateStaleBranch",
+        "title": "Lighthouse: Update Stale Branch (Fast-Forward)",
         "icon": "$(cloud-download)"
       },
       {
-        "command": "searchlight.filesExpandAll",
-        "title": "Searchlight: Expand All Files",
+        "command": "lighthouse.filesExpandAll",
+        "title": "Lighthouse: Expand All Files",
         "icon": "$(expand-all)"
       },
       {
-        "command": "searchlight.filesHideUncommitted",
-        "title": "Searchlight: Hide Uncommitted Changes",
+        "command": "lighthouse.filesHideUncommitted",
+        "title": "Lighthouse: Hide Uncommitted Changes",
         "icon": "$(eye)"
       },
       {
-        "command": "searchlight.filesShowUncommitted",
-        "title": "Searchlight: Show Uncommitted Changes",
+        "command": "lighthouse.filesShowUncommitted",
+        "title": "Lighthouse: Show Uncommitted Changes",
         "icon": "$(eye-closed)"
       },
       {
-        "command": "searchlight.conversationsHideResolved",
-        "title": "Searchlight: Hide Resolved Threads",
+        "command": "lighthouse.conversationsHideResolved",
+        "title": "Lighthouse: Hide Resolved Threads",
         "icon": "$(eye)"
       },
       {
-        "command": "searchlight.conversationsShowResolved",
-        "title": "Searchlight: Show Resolved Threads",
+        "command": "lighthouse.conversationsShowResolved",
+        "title": "Lighthouse: Show Resolved Threads",
         "icon": "$(eye-closed)"
       },
       {
-        "command": "searchlight.openCommitDiff",
-        "title": "Searchlight: Open Commit Diff"
+        "command": "lighthouse.openCommitDiff",
+        "title": "Lighthouse: Open Commit Diff"
       },
       {
-        "command": "searchlight.setCommitAsBase",
+        "command": "lighthouse.setCommitAsBase",
         "title": "Set as Base",
-        "category": "Searchlight",
+        "category": "Lighthouse",
         "icon": "$(git-compare)"
       },
       {
-        "command": "searchlight.unpinBase",
-        "title": "Searchlight: Unpin Base (Return to Automatic Selection)",
+        "command": "lighthouse.unpinBase",
+        "title": "Lighthouse: Unpin Base (Return to Automatic Selection)",
         "icon": "$(discard)"
       },
       {
-        "command": "searchlight.commitsViewAllChanges",
-        "title": "Searchlight: View All Changes vs Base",
+        "command": "lighthouse.commitsViewAllChanges",
+        "title": "Lighthouse: View All Changes vs Base",
         "icon": "$(diff-multiple)"
       },
       {
-        "command": "searchlight.collapseAllCommits",
-        "title": "Searchlight: Collapse All Commits",
+        "command": "lighthouse.collapseAllCommits",
+        "title": "Lighthouse: Collapse All Commits",
         "icon": "$(collapse-all)"
       },
       {
-        "command": "searchlight.openCommitFileDiff",
-        "title": "Searchlight: Open Commit File Diff"
+        "command": "lighthouse.openCommitFileDiff",
+        "title": "Lighthouse: Open Commit File Diff"
       },
       {
-        "command": "searchlight.openTerminal",
-        "title": "Searchlight: Open Terminal in Compare Branch Directory",
+        "command": "lighthouse.openTerminal",
+        "title": "Lighthouse: Open Terminal in Compare Branch Directory",
         "icon": "$(terminal)"
       },
       {
-        "command": "searchlight.copyCompareBranch",
-        "title": "Searchlight: Copy Compare Branch Name",
+        "command": "lighthouse.copyCompareBranch",
+        "title": "Lighthouse: Copy Compare Branch Name",
         "icon": "$(copy)"
       },
       {
-        "command": "searchlight.copyComparePath",
-        "title": "Searchlight: Copy Compare Branch Path",
+        "command": "lighthouse.copyComparePath",
+        "title": "Lighthouse: Copy Compare Branch Path",
         "icon": "$(files)"
       }
     ],
     "configuration": {
-      "title": "Searchlight",
+      "title": "Lighthouse",
       "properties": {
-        "searchlight.tags": {
+        "lighthouse.tags": {
           "type": "array",
           "items": {
             "type": "string"
@@ -301,12 +301,12 @@
           ],
           "description": "Tags offered by /tag autocomplete in the comment box and applied to a thread's tags[]."
         },
-        "searchlight.copilotPath": {
+        "lighthouse.copilotPath": {
           "type": "string",
           "default": "copilot",
           "description": "Path to the Copilot CLI executable used by the 'Ask Copilot to Review' commands."
         },
-        "searchlight.copilotArgs": {
+        "lighthouse.copilotArgs": {
           "type": "array",
           "items": {
             "type": "string"
@@ -316,42 +316,42 @@
           ],
           "description": "Arguments passed to the Copilot CLI before the generated prompt string (the prompt is appended as the final argument)."
         },
-        "searchlight.defaultRemote": {
+        "lighthouse.defaultRemote": {
           "type": "string",
           "default": "",
           "description": "Default remote name used by 'Git Push'. Leave empty to let git use the branch's configured upstream."
         },
-        "searchlight.autoCreateOnEmpty": {
+        "lighthouse.autoCreateOnEmpty": {
           "type": "boolean",
           "default": true,
           "description": "When true, activation computes a default base/compare comparison and populates the panel. When false, base/compare stay unset until you pick them and the views show their welcome content."
         },
-        "searchlight.perfLogging": {
+        "lighthouse.perfLogging": {
           "type": "boolean",
           "default": true,
-          "description": "Record correlated startup, Git, storage and pane-readiness timings in the Searchlight OUTPUT channel and a bounded in-memory trace. Use 'Searchlight: Export Startup Diagnostics' to save a JSON report. Enable before reloading for a complete startup capture."
+          "description": "Record correlated startup, Git, storage and pane-readiness timings in the Lighthouse OUTPUT channel and a bounded in-memory trace. Use 'Lighthouse: Export Startup Diagnostics' to save a JSON report. Enable before reloading for a complete startup capture."
         },
-        "searchlight.usageLogging": {
+        "lighthouse.usageLogging": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically record local feature actions, pane exposure and editor-context usage in the Searchlight output log. No filenames, code, comments or remote telemetry are collected. Independent of performance logging."
+          "description": "Automatically record local feature actions, pane exposure and editor-context usage in the Lighthouse output log. No filenames, code, comments or remote telemetry are collected. Independent of performance logging."
         },
-        "searchlight.deferThreadsOnLoad": {
+        "lighthouse.deferThreadsOnLoad": {
           "type": "boolean",
           "default": true,
           "description": "When true, comment threads are not materialized eagerly during activation; rendering is deferred until an editor becomes visible (or a short fallback delay), avoiding thread flashing and editor-tab churn on load. User actions (reply, resolve) always render immediately."
         },
-        "searchlight.files.compactFolders": {
+        "lighthouse.files.compactFolders": {
           "type": "boolean",
           "default": true,
           "description": "When true, single-child folder chains in the Changed Files pane are compacted onto one row (e.g. 'Service/StoreService.Runner/Commands'), mirroring VS Code's explorer.compactFolders. Changes apply immediately — no reload needed."
         },
-        "searchlight.files.autoReveal": {
+        "lighthouse.files.autoReveal": {
           "type": "boolean",
           "default": true,
           "description": "When true, the Changed Files pane highlights the row matching the active editor, expanding its folders and scrolling it into view, mirroring VS Code's explorer.autoReveal. Revealing never opens or closes an editor."
         },
-        "searchlight.files.cumulativeDiff": {
+        "lighthouse.files.cumulativeDiff": {
           "type": "boolean",
           "default": true,
           "description": "When true, the Changed Files pane shows all committed AND uncommitted changes versus the effective baseline (automatic shared ancestor or pinned commit), as a single diff per file. Turn off to view committed and uncommitted changes separately. Only applies when the compare branch is the checked-out branch. Changes apply immediately — no reload needed."
@@ -361,165 +361,165 @@
     "menus": {
       "view/title": [
         {
-          "command": "searchlight.newConversation",
-          "when": "view == searchlight.conversations",
+          "command": "lighthouse.newConversation",
+          "when": "view == lighthouse.conversations",
           "group": "navigation@-1"
         },
         {
-          "command": "searchlight.collapseAllCommits",
-          "when": "view == searchlight.comparison",
+          "command": "lighthouse.collapseAllCommits",
+          "when": "view == lighthouse.comparison",
           "group": "navigation@0"
         },
         {
-          "command": "searchlight.copyCompareBranch",
-          "when": "view == searchlight.comparison",
+          "command": "lighthouse.copyCompareBranch",
+          "when": "view == lighthouse.comparison",
           "group": "navigation@1"
         },
         {
-          "command": "searchlight.copyComparePath",
-          "when": "view == searchlight.comparison",
+          "command": "lighthouse.copyComparePath",
+          "when": "view == lighthouse.comparison",
           "group": "navigation@2"
         },
         {
-          "command": "searchlight.openTerminal",
-          "when": "view == searchlight.comparison",
+          "command": "lighthouse.openTerminal",
+          "when": "view == lighthouse.comparison",
           "group": "navigation@3"
         },
         {
-          "command": "searchlight.refreshAll",
-          "when": "view == searchlight.comparison",
+          "command": "lighthouse.refreshAll",
+          "when": "view == lighthouse.comparison",
           "group": "navigation@4"
         },
         {
-          "command": "searchlight.filesHideUncommitted",
-          "when": "view == searchlight.files && !searchlight.filesUncommittedHidden",
+          "command": "lighthouse.filesHideUncommitted",
+          "when": "view == lighthouse.files && !lighthouse.filesUncommittedHidden",
           "group": "navigation@0"
         },
         {
-          "command": "searchlight.filesShowUncommitted",
-          "when": "view == searchlight.files && searchlight.filesUncommittedHidden",
+          "command": "lighthouse.filesShowUncommitted",
+          "when": "view == lighthouse.files && lighthouse.filesUncommittedHidden",
           "group": "navigation@0"
         },
         {
-          "command": "searchlight.filesExpandAll",
-          "when": "view == searchlight.files",
+          "command": "lighthouse.filesExpandAll",
+          "when": "view == lighthouse.files",
           "group": "navigation@2"
         },
         {
-          "command": "searchlight.refreshAll",
-          "when": "view == searchlight.files",
+          "command": "lighthouse.refreshAll",
+          "when": "view == lighthouse.files",
           "group": "navigation@3"
         },
         {
-          "command": "searchlight.conversationsHideResolved",
-          "when": "view == searchlight.conversations && !searchlight.conversationsResolvedHidden",
+          "command": "lighthouse.conversationsHideResolved",
+          "when": "view == lighthouse.conversations && !lighthouse.conversationsResolvedHidden",
           "group": "navigation@0"
         },
         {
-          "command": "searchlight.conversationsShowResolved",
-          "when": "view == searchlight.conversations && searchlight.conversationsResolvedHidden",
+          "command": "lighthouse.conversationsShowResolved",
+          "when": "view == lighthouse.conversations && lighthouse.conversationsResolvedHidden",
           "group": "navigation@0"
         },
         {
-          "command": "searchlight.refreshAll",
-          "when": "view == searchlight.conversations",
+          "command": "lighthouse.refreshAll",
+          "when": "view == lighthouse.conversations",
           "group": "navigation@1"
         }
       ],
       "webview/context": [
         {
-          "command": "searchlight.setCommitAsBase",
-          "when": "webviewId == searchlight.comparison && webviewSection == commit",
-          "group": "searchlight@1"
+          "command": "lighthouse.setCommitAsBase",
+          "when": "webviewId == lighthouse.comparison && webviewSection == commit",
+          "group": "lighthouse@1"
         },
         {
-          "command": "searchlight.copyCommitSha",
-          "when": "webviewId == searchlight.comparison && webviewSection == commit",
-          "group": "searchlight@2"
+          "command": "lighthouse.copyCommitSha",
+          "when": "webviewId == lighthouse.comparison && webviewSection == commit",
+          "group": "lighthouse@2"
         },
         {
-          "command": "searchlight.openCommitDiff",
-          "when": "webviewId == searchlight.comparison && webviewSection == commit",
-          "group": "searchlight@3"
+          "command": "lighthouse.openCommitDiff",
+          "when": "webviewId == lighthouse.comparison && webviewSection == commit",
+          "group": "lighthouse@3"
         }
       ],
       "view/item/context": [
         {
-          "command": "searchlight.resolveThreadNode",
-          "when": "view == searchlight.conversations && viewItem == searchlight.thread.unresolved",
+          "command": "lighthouse.resolveThreadNode",
+          "when": "view == lighthouse.conversations && viewItem == lighthouse.thread.unresolved",
           "group": "inline@1"
         },
         {
-          "command": "searchlight.unresolveThreadNode",
-          "when": "view == searchlight.conversations && viewItem == searchlight.thread.resolved",
+          "command": "lighthouse.unresolveThreadNode",
+          "when": "view == lighthouse.conversations && viewItem == lighthouse.thread.resolved",
           "group": "inline@1"
         }
       ],
       "comments/commentThread/title": [
         {
-          "command": "searchlight.toggleThreadResolved",
+          "command": "lighthouse.toggleThreadResolved",
           "group": "inline@1",
-          "when": "commentController == searchlight"
+          "when": "commentController == lighthouse"
         }
       ],
       "comments/commentThread/context": [
         {
-          "command": "searchlight.createOrReply",
+          "command": "lighthouse.createOrReply",
           "group": "inline@1",
-          "when": "commentController == searchlight"
+          "when": "commentController == lighthouse"
         }
       ],
       "commandPalette": [
         {
-          "command": "searchlight.viewConversation",
+          "command": "lighthouse.viewConversation",
           "when": "false"
         },
         {
-          "command": "searchlight.setCommitAsBase",
+          "command": "lighthouse.setCommitAsBase",
           "when": "false"
         },
         {
-          "command": "searchlight.createOrReply",
+          "command": "lighthouse.createOrReply",
           "when": "false"
         },
         {
-          "command": "searchlight.resolveThread",
+          "command": "lighthouse.resolveThread",
           "when": "false"
         },
         {
-          "command": "searchlight.unresolveThread",
+          "command": "lighthouse.unresolveThread",
           "when": "false"
         },
         {
-          "command": "searchlight.resolveThreadNode",
+          "command": "lighthouse.resolveThreadNode",
           "when": "false"
         },
         {
-          "command": "searchlight.unresolveThreadNode",
+          "command": "lighthouse.unresolveThreadNode",
           "when": "false"
         },
         {
-          "command": "searchlight.askCopilotThread",
+          "command": "lighthouse.askCopilotThread",
           "when": "false"
         },
         {
-          "command": "searchlight.openFileDiff",
+          "command": "lighthouse.openFileDiff",
           "when": "false"
         },
         {
-          "command": "searchlight.openCumulativeFileDiff",
+          "command": "lighthouse.openCumulativeFileDiff",
           "when": "false"
         },
         {
-          "command": "searchlight.openCommitDiff",
+          "command": "lighthouse.openCommitDiff",
           "when": "false"
         },
         {
-          "command": "searchlight.openCommitFileDiff",
+          "command": "lighthouse.openCommitFileDiff",
           "when": "false"
         },
         {
-          "command": "searchlight.copyCommitSha",
+          "command": "lighthouse.copyCommitSha",
           "when": "false"
         }
       ]

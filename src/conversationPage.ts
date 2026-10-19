@@ -10,7 +10,7 @@ import { conversationPageHtml } from './conversationPageHtml';
 import { recordUsage } from './usage';
 import { errorFields, event, trace } from './diagnostics';
 
-export const CONVERSATION_PAGE_TYPE = 'searchlight.conversationPage';
+export const CONVERSATION_PAGE_TYPE = 'lighthouse.conversationPage';
 
 interface Page {
 	panel: vscode.WebviewPanel;
@@ -89,7 +89,7 @@ export class ConversationPages implements vscode.Disposable, vscode.WebviewPanel
 			await this.attach(panel, reference);
 		} catch (error) {
 			panel.dispose();
-			void vscode.window.showErrorMessage(`Searchlight: could not restore the thread: ${messageOf(error)}`);
+			void vscode.window.showErrorMessage(`Lighthouse: could not restore the thread: ${messageOf(error)}`);
 		}
 	}
 

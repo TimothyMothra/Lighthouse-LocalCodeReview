@@ -202,7 +202,7 @@ test('review diagnostics distinguish loaded, invalid, missing and inaccessible f
 			workspaceFolders: [{ uri: uri(root) }],
 			findFiles: async () => assert.fail('Do not search the workspace'),
 			fs: {
-				readDirectory: async (uri) => path.basename(uri.fsPath) === 'searchlight-reviews'
+				readDirectory: async (uri) => path.basename(uri.fsPath) === 'lighthouse-reviews'
 					? ['valid', 'invalid', 'missing', 'denied'].map((name) => [name, 2])
 					: [['comments.json', 1]],
 				readFile: async (uri) => {
@@ -433,10 +433,14 @@ test('lazy startup stays Git-free before demand, retries cleanly, shares snapsho
 				onDidChangeTabGroups: disposable,
 			},
 			onDidChangeWindowState: disposable,
-			createOutputChannel: () => channel,
+			createOutputChannel: (name) => { assert.equal(name, 'Lighthouse'); return channel; },
 			registerWebviewViewProvider: (id, provider) => { panes.set(id, provider); return disposable(); },
 			registerWebviewPanelSerializer: disposable,
-			onDidChangeActiveTextEditor: disposable, showSaveDialog: async () => ({ fsPath: 'fixture-export' }),
+			onDidChangeActiveTextEditor: disposable,
+			showSaveDialog: async (options) => {
+				assert.match(options.defaultUri.fsPath, /lighthouse-startup\.json$/);
+				return { fsPath: 'fixture-export' };
+			},
 			showInformationMessage: noop, showErrorMessage: (message) => failures.push(message),
 		},
 		commands: { registerCommand: (name, handler) => { commands.set(name, handler); return disposable(); } },
@@ -485,7 +489,7 @@ test('lazy startup stays Git-free before demand, retries cleanly, shares snapsho
 	const root = new Promise((resolve) => { release = resolve; });
 	const extension = loadCompiled('extension', {
 		vscode, './perf': perf, './webviewMetrics': metrics,
-		'./commentController': { SearchlightCommentController: Comments },
+		'./commentController': { LighthouseCommentController: Comments },
 		'./tagCompletion': { registerTagCompletion: disposable },
 		'./reviewStore': {}, './reviewModel': {},
 		'./reviewedFiles': loadCompiled('reviewedFiles', { vscode, './reviewStore': {}, './git': {} }),
@@ -510,11 +514,11 @@ test('lazy startup stays Git-free before demand, retries cleanly, shares snapsho
 		'./conversationsWebview': { ConversationsWebviewProvider: Provider, syncResolvedContext: noop, isResolvedHidden: () => false },
 		'./reviewDiff': { DIFF_SCHEME: 'fixture', ReviewDiffContentProvider: class {} },
 		'./conversationDocument': {
-			CONVERSATION_SCHEME: 'searchlight-conversation',
+			CONVERSATION_SCHEME: 'lighthouse-conversation',
 			ConversationDocumentProvider: class { open() { conversationOpens++; } refresh() {} dispose() {} },
 		},
 		'./conversationPage': {
-			CONVERSATION_PAGE_TYPE: 'searchlight.conversationPage',
+			CONVERSATION_PAGE_TYPE: 'lighthouse.conversationPage',
 			ConversationPages: class { open() { conversationOpens++; } openNew() {} refresh() {} dispose() {} },
 		},
 	});
@@ -524,38 +528,42 @@ test('lazy startup stays Git-free before demand, retries cleanly, shares snapsho
 	};
 	try {
 		await extension.activate(context);
+		for (const { command } of require('../package.json').contributes.commands) {
+			assert.ok(commands.has(command), `Manifest command must have a runtime handler: ${command}`);
+		}
+		assert.deepEqual([...panes.keys()], require('../package.json').contributes.views.lighthouse.map((view) => view.id));
 		assert.ok(require('../package.json').contributes.commands.some(
-			(command) => command.command === 'searchlight.exportStartupDiagnostics'));
+			(command) => command.command === 'lighthouse.exportStartupDiagnostics'));
 		assert.ok(diagnostics.diagnosticsSnapshot().milestones['activation.return']);
 		assert.equal(diagnostics.diagnosticsSnapshot().milestones['startup.backgroundComplete'], undefined);
 		assert.equal(rootQueries, 0);
 		assert.equal(commentRenders, 1);
 		assert.ok(require('../package.json').activationEvents.includes('onStartupFinished'));
-		await commands.get('searchlight.createOrReply')({});
+		await commands.get('lighthouse.createOrReply')({});
 		assert.equal(replyCalls, 1);
 		assert.equal(rootQueries, 0);
-		await commands.get('searchlight.viewConversation')({});
+		await commands.get('lighthouse.viewConversation')({});
 		assert.equal(conversationOpens, 1);
 		assert.equal(rootQueries, 0);
-		await commands.get('searchlight.exportStartupDiagnostics')();
+		await commands.get('lighthouse.exportStartupDiagnostics')();
 		assert.equal(rootQueries, 0);
 		assert.ok(exported.usage);
 		for (let i = 0; i < 20; i++) { tabsChanged(); }
-		await commands.get('searchlight.exportStartupDiagnostics')();
+		await commands.get('lighthouse.exportStartupDiagnostics')();
 		assert.equal(exported.usage.counts.internal.editorChanged, 0);
 		editorPath = '/another-private-file.ts';
 		tabsChanged();
 		editorColumn = 2;
 		tabsChanged();
-		await commands.get('searchlight.exportStartupDiagnostics')();
+		await commands.get('lighthouse.exportStartupDiagnostics')();
 		assert.equal(exported.usage.counts.internal.editorChanged, 2);
 		assert.ok(!JSON.stringify(exported.usage).includes('private-file'));
-		const firstPane = panes.get('searchlight.comparison').resolveWebviewView({}, {}, {});
-		const secondPane = panes.get('searchlight.files').resolveWebviewView({}, {}, {});
+		const firstPane = panes.get('lighthouse.comparison').resolveWebviewView({}, {}, {});
+		const secondPane = panes.get('lighthouse.files').resolveWebviewView({}, {}, {});
 		await new Promise(setImmediate);
 		assert.equal(rootQueries, 1);
 		assert.ok(diagnostics.diagnosticsSnapshot().pending.some((span) => span.name === 'startup.repoRoot'));
-		await commands.get('searchlight.exportStartupDiagnostics')();
+		await commands.get('lighthouse.exportStartupDiagnostics')();
 		assert.equal(exported.trace.schemaVersion, 1);
 		assert.ok(exported.trace.pending.some((span) => span.name === 'startup.repoRoot'));
 		release({ root: 'fixture-workspace', headPath: path.resolve('.git', 'HEAD'), commonDir: path.resolve('.git') });
@@ -572,8 +580,8 @@ test('lazy startup stays Git-free before demand, retries cleanly, shares snapsho
 		assert.equal(failures.length, 1);
 		assert.ok(watches[1].disposed && watches[2].disposed, 'failed initialization disposes its early watches');
 		await Promise.all([
-			panes.get('searchlight.comparison').resolveWebviewView({}, {}, {}),
-			panes.get('searchlight.files').resolveWebviewView({}, {}, {}),
+			panes.get('lighthouse.comparison').resolveWebviewView({}, {}, {}),
+			panes.get('lighthouse.files').resolveWebviewView({}, {}, {}),
 		]);
 		await new Promise(setImmediate);
 		assert.ok(diagnostics.diagnosticsSnapshot().milestones['startup.backgroundComplete']);

@@ -1,5 +1,5 @@
 /**
- * Searchlight: Local Code Review — extension entry point.
+ * Lighthouse: Local Code Review — extension entry point.
  *
  * Wires together:
  *   - the "Local Reviews" TreeView (from the v0 scaffold),
@@ -12,7 +12,7 @@
 
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { SearchlightCommentController } from './commentController';
+import { LighthouseCommentController } from './commentController';
 import { registerTagCompletion } from './tagCompletion';
 import * as store from './reviewStore';
 import { Review } from './reviewModel';
@@ -53,10 +53,10 @@ import { ConversationDocumentProvider, CONVERSATION_SCHEME } from './conversatio
 import { ConversationPages, CONVERSATION_PAGE_TYPE } from './conversationPage';
 import { ReviewedFiles } from './reviewedFiles';
 
-/** Shared "Searchlight" output channel for user-visible git/action feedback. Assigned in `activate`. */
+/** Shared "Lighthouse" output channel for user-visible git/action feedback. Assigned in `activate`. */
 let outputChannel: vscode.OutputChannel | undefined;
 
-/** Timestamped line into the Searchlight output channel (no-op before activation). */
+/** Timestamped line into the Lighthouse output channel (no-op before activation). */
 function log(message: string): void {
 	const stamp = new Date().toLocaleTimeString();
 	outputChannel?.appendLine(`[${stamp}] ${message}`);
@@ -65,9 +65,9 @@ function log(message: string): void {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	const tActivate = now();
 	// Shared output channel for git/action feedback (Update, terminal, etc.).
-	outputChannel = vscode.window.createOutputChannel('Searchlight');
+	outputChannel = vscode.window.createOutputChannel('Lighthouse');
 	context.subscriptions.push(outputChannel);
-	const cfg = vscode.workspace.getConfiguration('searchlight');
+	const cfg = vscode.workspace.getConfiguration('lighthouse');
 	initPerf(outputChannel, tActivate, {
 		extensionVersion: context.extension.packageJSON.version,
 		vscodeVersion: vscode.version, nodeVersion: process.version,
@@ -119,7 +119,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	let comparisonInit: Promise<void> | undefined;
 	let repositoryReady: Promise<void> | undefined;
 	const ensureComparison = async (reason: string): Promise<void> => {
-		if (!initializeComparison) { throw new Error('Searchlight: open a workspace before starting a comparison.'); }
+		if (!initializeComparison) { throw new Error('Lighthouse: open a workspace before starting a comparison.'); }
 		if (!comparisonInit) {
 			milestone('startup.comparisonRequested', { reason });
 			sampleHostForMinute();
@@ -130,7 +130,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				comparisonInit = undefined;
 				milestone('startup.failed');
 				log(`Comparison initialization failed: ${errMessage(error)}`);
-				void vscode.window.showErrorMessage('Searchlight: comparison initialization failed. See the Searchlight output channel.');
+				void vscode.window.showErrorMessage('Lighthouse: comparison initialization failed. See the Lighthouse output channel.');
 				throw error;
 			});
 		}
@@ -142,11 +142,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		await (repositoryReady ? Promise.race([repositoryReady, initialized]) : initialized);
 	};
 	const independentCommands = new Set([
-		'searchlight.exportStartupDiagnostics', 'searchlight.openThreadLocation',
-		'searchlight.viewConversation',
-		'searchlight.createOrReply', 'searchlight.resolveThread', 'searchlight.unresolveThread',
-		'searchlight.toggleThreadResolved', 'searchlight.askCopilotThread', 'searchlight.askCopilotReview',
-		'searchlight.copyCommitId', 'searchlight.copyBranchName', 'searchlight.copyDirPath',
+		'lighthouse.exportStartupDiagnostics', 'lighthouse.openThreadLocation',
+		'lighthouse.viewConversation',
+		'lighthouse.createOrReply', 'lighthouse.resolveThread', 'lighthouse.unresolveThread',
+		'lighthouse.toggleThreadResolved', 'lighthouse.askCopilotThread', 'lighthouse.askCopilotReview',
+		'lighthouse.copyCommitId', 'lighthouse.copyBranchName', 'lighthouse.copyDirPath',
 	]);
 	const registerCommand = <Args extends unknown[]>(command: string, handler: (...args: Args) => unknown) =>
 		vscode.commands.registerCommand(command, async (...args: Args) => {
@@ -172,31 +172,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		}, { webviewOptions: { retainContextWhenHidden } });
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((e) => {
-			if (e.affectsConfiguration('searchlight.perfLogging')) {
-				setDiagnosticsEnabled(vscode.workspace.getConfiguration('searchlight').get<boolean>('perfLogging', true));
+			if (e.affectsConfiguration('lighthouse.perfLogging')) {
+				setDiagnosticsEnabled(vscode.workspace.getConfiguration('lighthouse').get<boolean>('perfLogging', true));
 			}
-			if (e.affectsConfiguration('searchlight.usageLogging')) {
-				setUsageEnabled(vscode.workspace.getConfiguration('searchlight').get<boolean>('usageLogging', true));
+			if (e.affectsConfiguration('lighthouse.usageLogging')) {
+				setUsageEnabled(vscode.workspace.getConfiguration('lighthouse').get<boolean>('usageLogging', true));
 			}
 		}),
-		registerCommand('searchlight.exportStartupDiagnostics', async () => {
+		registerCommand('lighthouse.exportStartupDiagnostics', async () => {
 			const uri = await vscode.window.showSaveDialog({
-				title: 'Export Searchlight startup diagnostics',
-				defaultUri: vscode.Uri.joinPath(context.logUri, 'searchlight-startup.json'),
+				title: 'Export Lighthouse startup diagnostics',
+				defaultUri: vscode.Uri.joinPath(context.logUri, 'lighthouse-startup.json'),
 				filters: { JSON: ['json'] },
 			});
 			if (!uri) { return; }
 			try {
 				const report = { trace: diagnosticsSnapshot(), panes: paneSnapshot(), usage: usageSnapshot() };
 				await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(report, null, 2), 'utf8'));
-				void vscode.window.showInformationMessage('Searchlight: startup diagnostics exported.');
+				void vscode.window.showInformationMessage('Lighthouse: startup diagnostics exported.');
 			} catch (error) {
-				void vscode.window.showErrorMessage(`Searchlight: diagnostic export failed: ${errMessage(error)}`);
+				void vscode.window.showErrorMessage(`Lighthouse: diagnostic export failed: ${errMessage(error)}`);
 			}
 		}),
 	);
 
-	// ASSUMPTION: these are shared extension-host signals, not CPU/memory attributed to Searchlight.
+	// ASSUMPTION: these are shared extension-host signals, not CPU/memory attributed to Lighthouse.
 	let hostTimer: ReturnType<typeof setInterval> | undefined;
 	function sampleHostForMinute(): void {
 		if (hostTimer) { clearInterval(hostTimer); }
@@ -225,7 +225,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	sampleHostForMinute();
 	context.subscriptions.push({ dispose: () => { if (hostTimer) { clearInterval(hostTimer); } } });
 
-	// Load-time instrumentation: header + overall activation timer (gated by searchlight.perfLogging).
+	// Load-time instrumentation: header + overall activation timer (gated by lighthouse.perfLogging).
 	perfLine('--- activation ---');
 
 	// Status-bar active-review switcher (src → tgt); hidden when there's no review.
@@ -248,7 +248,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 	// Inline comment threads. Constructed after `active` so new (first-ever) threads can target
 	// the currently-viewed comparison's review even before any comments.json exists on disk.
-	const comments = new SearchlightCommentController(() => active, () => ensureComparison('new-discussion'));
+	const comments = new LighthouseCommentController(() => active, () => ensureComparison('new-discussion'));
 	context.subscriptions.push(comments);
 
 	// Three stacked webviews; Comparison owns the selectors and compact commit tree.
@@ -284,10 +284,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	);
 
 	context.subscriptions.push(
-		registerPane('searchlight.comparison', comparisonProvider, true),
+		registerPane('lighthouse.comparison', comparisonProvider, true),
 	);
 	context.subscriptions.push(
-		registerPane('searchlight.files', filesProvider, true),
+		registerPane('lighthouse.files', filesProvider, true),
 	);
 	// The Conversations pane is now a webview (Phase E). Its thread rows,
 	// per-comment #tag badges, resolve/unresolve inline buttons, and
@@ -295,7 +295,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	// message handling — no TreeView subscription. refresh() re-posts state so
 	// the Files->Conversations refresh hook and refreshAll keep working.
 	context.subscriptions.push(
-		registerPane('searchlight.conversations', conversationsProvider, true),
+		registerPane('lighthouse.conversations', conversationsProvider, true),
 	);
 
 	// Seed the show/hide-uncommitted context key from persisted state so the correct title-bar button
@@ -309,7 +309,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	// pane live instead of requiring a reload.
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((e) => {
-			if (e.affectsConfiguration('searchlight.files.compactFolders') || e.affectsConfiguration('searchlight.files.cumulativeDiff')) {
+			if (e.affectsConfiguration('lighthouse.files.compactFolders') || e.affectsConfiguration('lighthouse.files.cumulativeDiff')) {
 				filesProvider.refresh();
 			}
 		}),
@@ -351,7 +351,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		askCopilot: (reviewFile, threadId) => askCopilot(path.dirname(reviewFile), threadId),
 		openCode: async (thread) => {
 			if (thread.filePath) {
-				await vscode.commands.executeCommand('searchlight.openThreadLocation', thread.filePath, thread.startLine ?? 1, thread.endLine ?? thread.startLine ?? 1);
+				await vscode.commands.executeCommand('lighthouse.openThreadLocation', thread.filePath, thread.startLine ?? 1, thread.endLine ?? thread.startLine ?? 1);
 			}
 		},
 	});
@@ -360,17 +360,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		conversationPages,
 		vscode.workspace.registerTextDocumentContentProvider(CONVERSATION_SCHEME, conversationDocuments),
 		vscode.window.registerWebviewPanelSerializer(CONVERSATION_PAGE_TYPE, conversationPages),
-		registerCommand('searchlight.viewConversation', async (target: unknown) => {
+		registerCommand('lighthouse.viewConversation', async (target: unknown) => {
 			try {
 				await conversationPages.open(target);
 			} catch (error) {
-				void vscode.window.showErrorMessage(`Searchlight: ${errMessage(error)}`);
+				void vscode.window.showErrorMessage(`Lighthouse: ${errMessage(error)}`);
 				throw error;
 			}
 		}),
-		registerCommand('searchlight.newConversation', async () => {
+		registerCommand('lighthouse.newConversation', async () => {
 			if (!active.review) {
-				void vscode.window.showWarningMessage('Searchlight: select a source and target branch before starting a thread.');
+				void vscode.window.showWarningMessage('Lighthouse: select a source and target branch before starting a thread.');
 				return;
 			}
 			await conversationPages.openNew({
@@ -391,7 +391,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 	// Manual refresh (also wired to the view/title button).
 	context.subscriptions.push(
-		registerCommand('searchlight.refresh', () => {
+		registerCommand('lighthouse.refresh', () => {
 			refreshAll('manual-refresh');
 		}),
 	);
@@ -399,7 +399,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	// Open a thread's file and reveal `filePath:startLine`.
 	context.subscriptions.push(
 		registerCommand(
-			'searchlight.openThreadLocation',
+			'lighthouse.openThreadLocation',
 			async (filePath: string, startLine: number, endLine: number) => {
 				await openThreadLocation(filePath, startLine, endLine);
 				// Also expand the matching live CommentThread at that anchor (leaves others as-is).
@@ -411,24 +411,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	// ── Comment thread commands ────────────────────────────────────────────────
 	context.subscriptions.push(
 		registerCommand(
-			'searchlight.createOrReply',
+			'lighthouse.createOrReply',
 			(reply: vscode.CommentReply) => comments.handleReply(reply),
 		),
 		registerCommand(
-			'searchlight.resolveThread',
+			'lighthouse.resolveThread',
 			(thread: vscode.CommentThread) => comments.setState(thread, 'resolved'),
 		),
 		registerCommand(
-			'searchlight.unresolveThread',
+			'lighthouse.unresolveThread',
 			(thread: vscode.CommentThread) => comments.setState(thread, 'unresolved'),
 		),
 		// Single always-visible in-thread toggle. RATIONALE: the split resolve/reopen title actions
 		// depend on the `commentThreadState` context key (when clauses `== unresolved` / `== resolved`),
 		// which did not resolve reliably in the host VS Code build — so neither `when` matched and NO
-		// button rendered. This one command is keyed only on `commentController == searchlight`, so it
+		// button rendered. This one command is keyed only on `commentController == lighthouse`, so it
 		// renders unconditionally; the handler reads the thread's current state and flips it.
 		registerCommand(
-			'searchlight.toggleThreadResolved',
+			'lighthouse.toggleThreadResolved',
 			async (thread: vscode.CommentThread) => {
 				const next =
 					thread?.state === vscode.CommentThreadState.Resolved ? 'unresolved' : 'resolved';
@@ -440,7 +440,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			},
 		),
 		registerCommand(
-			'searchlight.resolveThreadNode',
+			'lighthouse.resolveThreadNode',
 			// The Conversations webview posts a { thread: { id } } stub; the former ConversationNode
 			// (native TreeItem, deleted in Phase F) satisfied this same minimal shape.
 			async (node: { thread?: { id?: string } }) => {
@@ -455,7 +455,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			},
 		),
 		registerCommand(
-			'searchlight.unresolveThreadNode',
+			'lighthouse.unresolveThreadNode',
 			async (node: { thread?: { id?: string } }) => {
 				const reviewFile = active.review?.sourceFile;
 				const threadId = node?.thread?.id;
@@ -468,19 +468,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			},
 		),
 		registerCommand(
-			'searchlight.askCopilotThread',
+			'lighthouse.askCopilotThread',
 			async (thread: vscode.CommentThread) => {
 				const binding = comments.getBinding(thread);
 				if (!binding) {
 					void vscode.window.showWarningMessage(
-						'Searchlight: this thread is not backed by a review file yet.',
+						'Lighthouse: this thread is not backed by a review file yet.',
 					);
 					return;
 				}
 				askCopilot(binding.reviewDir, binding.threadId);
 			},
 		),
-		registerCommand('searchlight.askCopilotReview', async () => {
+		registerCommand('lighthouse.askCopilotReview', async () => {
 			const review = await pickReview('Select a review for Copilot to look at');
 			if (review) {
 				askCopilot(path.dirname(review.sourceFile), undefined);
@@ -490,15 +490,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 	// ── Copy commands ──────────────────────────────────────────────────────────
 	context.subscriptions.push(
-		registerCommand('searchlight.copyCommitId', async () => {
+		registerCommand('lighthouse.copyCommitId', async () => {
 			const review = await pickReview('Copy commit id from which review?');
 			await copyValue(review?.sourceCommit, 'commit id');
 		}),
-		registerCommand('searchlight.copyBranchName', async () => {
+		registerCommand('lighthouse.copyBranchName', async () => {
 			const review = await pickReview('Copy branch name from which review?');
 			await copyValue(review?.sourceBranch, 'branch name');
 		}),
-		registerCommand('searchlight.copyDirPath', async () => {
+		registerCommand('lighthouse.copyDirPath', async () => {
 			const review = await pickReview('Copy directory path from which review?');
 			await copyValue(review ? path.dirname(review.sourceFile) : undefined, 'directory path');
 		}),
@@ -507,43 +507,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	// ── Git / directory integration (v1.5) ────────────────────────────────────
 	context.subscriptions.push(
 		registerCommand(
-			'searchlight.pickBranches',
+			'lighthouse.pickBranches',
 			async (node?: { review?: Review }) => {
 				await pickBranches(node?.review, refreshAll);
 			},
 		),
-		registerCommand('searchlight.switchReview', async () => {
+		registerCommand('lighthouse.switchReview', async () => {
 			await switchReview(statusBar, refreshAll);
 		}),
 		registerCommand(
-			'searchlight.openDirectory',
+			'lighthouse.openDirectory',
 			async (node?: { review?: Review }) => {
 				await openDirectory(node?.review);
 			},
 		),
-		registerCommand('searchlight.gitPull', async () => {
+		registerCommand('lighthouse.gitPull', async () => {
 			await runGit('pull', async () => {
 				await active.resolve();
 				refreshAll('git-operation');
 			});
 		}),
-		registerCommand('searchlight.gitPush', async () => {
+		registerCommand('lighthouse.gitPush', async () => {
 			await runGit('push', async () => {
 				await active.resolve();
 				refreshAll('git-operation');
 			});
 		}),
 		registerCommand(
-			'searchlight.openTerminalHere',
+			'lighthouse.openTerminalHere',
 			async (node?: { review?: Review }) => {
 				await openTerminalHere(node?.review);
 			},
 		),
 	);
 
-	// ── Four-view comparison commands ──────────────────────────────────────────
+	// ── Three-view comparison commands (Commits is embedded) ────────────────────
 	context.subscriptions.push(
-		registerCommand('searchlight.pickBase', async () => {
+		registerCommand('lighthouse.pickBase', async () => {
 			const chosen = await pickBranch(active.repoRootFsPath, 'Select the base (target) branch', {
 				current: active.base,
 			});
@@ -552,7 +552,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				refreshAll();
 			}
 		}),
-		registerCommand('searchlight.pickCompare', async () => {
+		registerCommand('lighthouse.pickCompare', async () => {
 			const chosen = await pickBranch(
 				active.repoRootFsPath,
 				'Select the compare (source) branch',
@@ -563,93 +563,93 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				refreshAll();
 			}
 		}),
-		registerCommand('searchlight.swapBranches', async () => {
+		registerCommand('lighthouse.swapBranches', async () => {
 			await active.swap();
 			refreshAll();
 		}),
-		registerCommand('searchlight.unpinBase', async () => {
+		registerCommand('lighthouse.unpinBase', async () => {
 			await comparisonProvider.unpinBase(async () => {
 				await active.useAutomaticBase();
 				refreshAll('unpin-base');
 			});
 		}),
-		registerCommand('searchlight.copyCompareBranch', () =>
+		registerCommand('lighthouse.copyCompareBranch', () =>
 			comparisonProvider.copyCompareBranchName(),
 		),
-		registerCommand('searchlight.copyComparePath', () =>
+		registerCommand('lighthouse.copyComparePath', () =>
 			comparisonProvider.copyCompareBranchPath(),
 		),
-		registerCommand('searchlight.refreshAll', async () => {
+		registerCommand('lighthouse.refreshAll', async () => {
 			await active.resolve();
 			refreshAll('manual-resolve-refresh');
 		}),
-		registerCommand('searchlight.filesExpandAll', () => {
+		registerCommand('lighthouse.filesExpandAll', () => {
 			filesProvider.setExpanded(true);
 		}),
-		registerCommand('searchlight.filesHideUncommitted', async () => {
+		registerCommand('lighthouse.filesHideUncommitted', async () => {
 			await filesProvider.setHideUncommitted(true);
 		}),
-		registerCommand('searchlight.filesShowUncommitted', async () => {
+		registerCommand('lighthouse.filesShowUncommitted', async () => {
 			await filesProvider.setHideUncommitted(false);
 		}),
-		registerCommand('searchlight.conversationsHideResolved', async () => {
+		registerCommand('lighthouse.conversationsHideResolved', async () => {
 			await conversationsProvider.setHideResolved(true);
 		}),
-		registerCommand('searchlight.conversationsShowResolved', async () => {
+		registerCommand('lighthouse.conversationsShowResolved', async () => {
 			await conversationsProvider.setHideResolved(false);
 		}),
-		registerCommand('searchlight.collapseAllCommits', () => {
+		registerCommand('lighthouse.collapseAllCommits', () => {
 			comparisonProvider.setCommitsExpanded(false);
 		}),
-		registerCommand('searchlight.setCommitAsBase', async (commit: unknown) => {
+		registerCommand('lighthouse.setCommitAsBase', async (commit: unknown) => {
 			try {
 				await comparisonProvider.setCommitAsBase(commit);
 			} catch (error) {
 				const message = errMessage(error);
 				log(`Set as Base failed: ${message}`);
-				void vscode.window.showErrorMessage(`Searchlight: ${message}`);
+				void vscode.window.showErrorMessage(`Lighthouse: ${message}`);
 			}
 		}),
 		registerCommand(
-			'searchlight.updateStaleBranch',
+			'lighthouse.updateStaleBranch',
 			async (row?: 'base' | 'compare') => {
 				await updateStaleBranch(active, row, () => refreshAll('git-operation'));
 			},
 		),
-		registerCommand('searchlight.openFileDiff', async (relPath: string) => {
+		registerCommand('lighthouse.openFileDiff', async (relPath: string) => {
 			await openFileDiff(active, relPath);
 		}),
 		registerCommand(
-			'searchlight.openUncommittedFileDiff',
+			'lighthouse.openUncommittedFileDiff',
 			async (relPath: string, group: UncommittedGroup) => {
 				await openUncommittedFileDiff(active, relPath, group);
 			},
 		),
-		registerCommand('searchlight.openCumulativeFileDiff', async (relPath: string) => {
+		registerCommand('lighthouse.openCumulativeFileDiff', async (relPath: string) => {
 			await openCumulativeFileDiff(active, relPath);
 		}),
-		registerCommand('searchlight.openCommitDiff', async (commit: string | { sha?: string }) => {
+		registerCommand('lighthouse.openCommitDiff', async (commit: string | { sha?: string }) => {
 			const sha = typeof commit === 'string' ? commit : commit?.sha;
 			if (sha) { await openCommitDiff(active, sha); }
 		}),
 		registerCommand(
-			'searchlight.openCommitFileDiff',
+			'lighthouse.openCommitFileDiff',
 			async (sha: string, relPath: string) => {
 				await openCommitFileDiff(active, sha, relPath);
 			},
 		),
-		registerCommand('searchlight.openTerminal', () => {
+		registerCommand('lighthouse.openTerminal', () => {
 			const leaf = active.compare ? shortBranch(active.compare) : 'terminal';
 			const terminal = vscode.window.createTerminal({
-				name: `Searchlight: ${leaf}`,
+				name: `Lighthouse: ${leaf}`,
 				cwd: active.repoRootFsPath,
 			});
 			terminal.show();
 		}),
-		registerCommand('searchlight.commitsViewAllChanges', async () => {
+		registerCommand('lighthouse.commitsViewAllChanges', async () => {
 			await openAllChangesDiff(active);
 		}),
-		registerCommand('searchlight.copyCommitSha', async (node?: unknown) => {
+		registerCommand('lighthouse.copyCommitSha', async (node?: unknown) => {
 			const sha =
 				typeof node === 'string'
 					? node
@@ -658,13 +658,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				return;
 			}
 			await vscode.env.clipboard.writeText(sha);
-			void vscode.window.showInformationMessage(`Searchlight: copied commit ${sha}`);
+			void vscode.window.showInformationMessage(`Lighthouse: copied commit ${sha}`);
 		}),
 	);
 
 	// Keep the tree AND the inline comments in sync with on-disk review files.
 	const watcher = vscode.workspace.createFileSystemWatcher(
-		'**/.vscode/searchlight-reviews/**/comments.json',
+		'**/.vscode/lighthouse-reviews/**/comments.json',
 	);
 	const refreshReviews = (uri: vscode.Uri, reason: string): void => {
 		conversationDocuments.refresh(uri);
@@ -739,7 +739,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 						}
 					})().catch((error) => {
 						log(`Could not refresh repository state: ${errMessage(error)}`);
-						void vscode.window.showWarningMessage('Searchlight: repository refresh failed. Use Refresh to retry.');
+						void vscode.window.showWarningMessage('Lighthouse: repository refresh failed. Use Refresh to retry.');
 					});
 				}, 250);
 			};
@@ -765,7 +765,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				watchingRefs = true;
 			} catch (error) {
 				log(`Could not watch comparison refs: ${errMessage(error)}`);
-				void vscode.window.showWarningMessage('Searchlight: ref watching is unavailable. Use Refresh after updating branches.');
+				void vscode.window.showWarningMessage('Lighthouse: ref watching is unavailable. Use Refresh after updating branches.');
 			}
 
 			await gitReady;
@@ -786,7 +786,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			publishRepositoryReady();
 			comparisonProvider.refresh();
 
-			const autoCreateOnEmpty = vscode.workspace.getConfiguration('searchlight').get<boolean>('autoCreateOnEmpty', true);
+			const autoCreateOnEmpty = vscode.workspace.getConfiguration('lighthouse').get<boolean>('autoCreateOnEmpty', true);
 			let snapshot: ComparisonSnapshot | undefined;
 			const snapshotGeneration = comparisonGeneration;
 			if (autoCreateOnEmpty && repository && watchingRefs) {
@@ -843,7 +843,7 @@ export function deactivate(): void {
  * comments.json, the file watcher re-renders the thread automatically.
  */
 function askCopilot(reviewDir: string, threadId: string | undefined): void {
-	const cfg = vscode.workspace.getConfiguration('searchlight');
+	const cfg = vscode.workspace.getConfiguration('lighthouse');
 	const cliPath = cfg.get<string>('copilotPath', 'copilot');
 	const cliArgs = cfg.get<string[]>('copilotArgs', ['-p']);
 
@@ -856,7 +856,7 @@ function askCopilot(reviewDir: string, threadId: string | undefined): void {
 		`and set thread state appropriately. Threads without filePath are review-wide threads; ` +
 		`answer their messages without inventing a code location.`;
 
-	const terminal = vscode.window.createTerminal({ name: 'Searchlight · Copilot', cwd: reviewDir });
+	const terminal = vscode.window.createTerminal({ name: 'Lighthouse · Copilot', cwd: reviewDir });
 	terminal.show();
 	const quotedArgs = cliArgs.map(shellQuote).join(' ');
 	terminal.sendText(`${shellQuote(cliPath)} ${quotedArgs} ${shellQuote(prompt)}`.trim());
@@ -873,18 +873,18 @@ function shellQuote(value: string): string {
 /** Copy a value to the clipboard with user feedback, or warn when it is missing. */
 async function copyValue(value: string | undefined, label: string): Promise<void> {
 	if (!value) {
-		void vscode.window.showWarningMessage(`Searchlight: no ${label} available.`);
+		void vscode.window.showWarningMessage(`Lighthouse: no ${label} available.`);
 		return;
 	}
 	await vscode.env.clipboard.writeText(value);
-	void vscode.window.showInformationMessage(`Searchlight: copied ${label} — ${value}`);
+	void vscode.window.showInformationMessage(`Lighthouse: copied ${label} — ${value}`);
 }
 
 /** Pick a review: auto-select when there's one, quick-pick when there are several. */
 async function pickReview(placeHolder: string): Promise<Review | undefined> {
 	const reviews = await store.scanReviews();
 	if (reviews.length === 0) {
-		void vscode.window.showWarningMessage('Searchlight: no review files found.');
+		void vscode.window.showWarningMessage('Lighthouse: no review files found.');
 		return undefined;
 	}
 	if (reviews.length === 1) {
@@ -910,7 +910,7 @@ async function openThreadLocation(
 ): Promise<void> {
 	const uri = await resolveWorkspaceFile(filePath);
 	if (!uri) {
-		void vscode.window.showWarningMessage(`Searchlight: could not locate file "${filePath}".`);
+		void vscode.window.showWarningMessage(`Lighthouse: could not locate file "${filePath}".`);
 		return;
 	}
 
@@ -961,12 +961,12 @@ function gitCwd(review?: Review): string | undefined {
 
 /** The configured default push remote, or `undefined` when unset (let git decide). */
 function remoteSetting(): string | undefined {
-	const value = vscode.workspace.getConfiguration('searchlight').get<string>('defaultRemote', '');
+	const value = vscode.workspace.getConfiguration('lighthouse').get<string>('defaultRemote', '');
 	return value.trim() ? value.trim() : undefined;
 }
 
 function warnNoWorkspace(): void {
-	void vscode.window.showWarningMessage('Searchlight: open a folder/workspace first.');
+	void vscode.window.showWarningMessage('Lighthouse: open a folder/workspace first.');
 }
 
 function errMessage(err: unknown): string {
@@ -987,7 +987,7 @@ async function pickBranch(
 ): Promise<BranchRef | undefined> {
 	const branches = await gitApi.listBranches(cwd);
 	if (branches.length === 0) {
-		void vscode.window.showWarningMessage('Searchlight: no branches found.');
+		void vscode.window.showWarningMessage('Lighthouse: no branches found.');
 		return undefined;
 	}
 	const head = await gitApi.getHead(cwd);
@@ -1046,22 +1046,22 @@ async function updateStaleBranch(
 	const branch = row === 'compare' ? active.compare : active.base;
 	if (!branch) {
 		const msg = 'no branch selected to update.';
-		void vscode.window.showWarningMessage(`Searchlight: ${msg}`);
+		void vscode.window.showWarningMessage(`Lighthouse: ${msg}`);
 		report?.(false, msg);
 		return;
 	}
 	if (branch.includes('/')) {
 		const msg = `'${branch}' is a remote-tracking branch and cannot be fast-forwarded.`;
 		log(`⚠ ${msg}`);
-		void vscode.window.showWarningMessage(`Searchlight: ${msg}`);
+		void vscode.window.showWarningMessage(`Lighthouse: ${msg}`);
 		report?.(false, msg);
 		return;
 	}
 	const cwd = active.repoRootFsPath;
 	// Immediate feedback the instant the op starts, before any git work runs.
-	vscode.window.setStatusBarMessage(`Searchlight: updating '${branch}'…`, 2000);
+	vscode.window.setStatusBarMessage(`Lighthouse: updating '${branch}'…`, 2000);
 	await vscode.window.withProgress(
-		{ location: vscode.ProgressLocation.Window, title: `Searchlight: updating '${branch}'…` },
+		{ location: vscode.ProgressLocation.Window, title: `Lighthouse: updating '${branch}'…` },
 		async () => {
 			try {
 				log(`⇣ Fetching origin for '${branch}'…`);
@@ -1069,9 +1069,9 @@ async function updateStaleBranch(
 				const ab = await aheadBehind(cwd, branch);
 				if (!ab || ab.behind === 0) {
 					log(`Already up to date: '${branch}'.`);
-					vscode.window.setStatusBarMessage(`Searchlight: '${branch}' already up to date`, 4000);
+					vscode.window.setStatusBarMessage(`Lighthouse: '${branch}' already up to date`, 4000);
 					void vscode.window.showInformationMessage(
-						`Searchlight: '${branch}' is already up to date.`,
+						`Lighthouse: '${branch}' is already up to date.`,
 					);
 					await active.resolve();
 					refreshAll();
@@ -1088,15 +1088,15 @@ async function updateStaleBranch(
 					const msg = `Cannot fast-forward '${branch}' — diverged from ${ab.upstream}; resolve manually.`;
 					log(`⚠ ${msg}`);
 					log('Click ↻ Update again to retry.');
-					vscode.window.setStatusBarMessage(`Searchlight: '${branch}' cannot fast-forward`, 5000);
-					void vscode.window.showWarningMessage(`Searchlight: ${msg}`);
+					vscode.window.setStatusBarMessage(`Lighthouse: '${branch}' cannot fast-forward`, 5000);
+					void vscode.window.showWarningMessage(`Lighthouse: ${msg}`);
 					report?.(false, msg);
 					return;
 				}
 				log(`Fast-forwarded '${branch}' to ${ab.upstream}.`);
-				vscode.window.setStatusBarMessage(`Searchlight: fast-forwarded '${branch}'`, 4000);
+				vscode.window.setStatusBarMessage(`Lighthouse: fast-forwarded '${branch}'`, 4000);
 				void vscode.window.showInformationMessage(
-					`Searchlight: fast-forwarded '${branch}' to ${ab.upstream}.`,
+					`Lighthouse: fast-forwarded '${branch}' to ${ab.upstream}.`,
 				);
 				await active.resolve();
 				refreshAll();
@@ -1105,8 +1105,8 @@ async function updateStaleBranch(
 				const msg = err instanceof Error ? err.message : String(err);
 				log(`⚠ Update failed for '${branch}': ${msg}`);
 				log('Click ↻ Update again to retry.');
-				vscode.window.setStatusBarMessage(`Searchlight: update failed for '${branch}'`, 5000);
-				void vscode.window.showWarningMessage(`Searchlight: update failed for '${branch}': ${msg}`);
+				vscode.window.setStatusBarMessage(`Lighthouse: update failed for '${branch}'`, 5000);
+				void vscode.window.showWarningMessage(`Lighthouse: update failed for '${branch}': ${msg}`);
 				report?.(false, msg);
 			}
 		},
@@ -1129,7 +1129,7 @@ async function pickBranches(review: Review | undefined, refreshAll: () => void):
 		return;
 	}
 	if (!(await gitApi.hasRepository(cwd))) {
-		void vscode.window.showErrorMessage('Searchlight: no git repository in the workspace.');
+		void vscode.window.showErrorMessage('Lighthouse: no git repository in the workspace.');
 		return;
 	}
 	const source = await pickBranch(cwd, 'Select SOURCE branch (the changes under review)');
@@ -1148,7 +1148,7 @@ async function pickBranches(review: Review | undefined, refreshAll: () => void):
 		fresh.targetCommit = base.commit;
 	});
 	void vscode.window.showInformationMessage(
-		`Searchlight: review set to ${source.name} → ${base.name}.`,
+		`Lighthouse: review set to ${source.name} → ${base.name}.`,
 	);
 	refreshAll();
 }
@@ -1160,7 +1160,7 @@ async function pickBranches(review: Review | undefined, refreshAll: () => void):
 async function switchReview(statusBar: ReviewStatusBar, refreshAll: () => void): Promise<void> {
 	const reviews = await store.scanReviews();
 	if (reviews.length === 0) {
-		void vscode.window.showWarningMessage('Searchlight: no review files found.');
+		void vscode.window.showWarningMessage('Lighthouse: no review files found.');
 		return;
 	}
 	if (reviews.length === 1) {
@@ -1201,7 +1201,7 @@ async function openDirectory(review?: Review): Promise<void> {
 	);
 	if (candidates.length === 0) {
 		void vscode.window.showInformationMessage(
-			'Searchlight: this review has no branches set — run "Pick Branches" first.',
+			'Lighthouse: this review has no branches set — run "Pick Branches" first.',
 		);
 		return;
 	}
@@ -1220,7 +1220,7 @@ async function openDirectory(review?: Review): Promise<void> {
 	const match = worktrees.find((w) => w.branch === branch || w.branch === short);
 	if (!match) {
 		void vscode.window.showInformationMessage(
-			`Searchlight: branch "${branch}" is not checked out in any worktree.`,
+			`Lighthouse: branch "${branch}" is not checked out in any worktree.`,
 		);
 		return;
 	}
@@ -1244,19 +1244,19 @@ async function runGit(op: 'pull' | 'push', refreshAll: () => void | Promise<void
 		return;
 	}
 	if (!(await gitApi.hasRepository(cwd))) {
-		void vscode.window.showErrorMessage('Searchlight: no git repository in the workspace.');
+		void vscode.window.showErrorMessage('Lighthouse: no git repository in the workspace.');
 		return;
 	}
 	if (op === 'push') {
 		const head = await gitApi.getHead(cwd);
 		if (head.detached) {
-			void vscode.window.showErrorMessage('Searchlight: cannot push a detached HEAD.');
+			void vscode.window.showErrorMessage('Lighthouse: cannot push a detached HEAD.');
 			return;
 		}
 	}
 	const remote = op === 'push' ? remoteSetting() : undefined;
 	await vscode.window.withProgress(
-		{ location: vscode.ProgressLocation.Notification, title: `Searchlight: git ${op}…` },
+		{ location: vscode.ProgressLocation.Notification, title: `Lighthouse: git ${op}…` },
 		async () => {
 			try {
 				if (op === 'pull') {
@@ -1264,11 +1264,11 @@ async function runGit(op: 'pull' | 'push', refreshAll: () => void | Promise<void
 				} else {
 					await gitApi.push(cwd, remote);
 				}
-				void vscode.window.showInformationMessage(`Searchlight: git ${op} succeeded.`);
+				void vscode.window.showInformationMessage(`Lighthouse: git ${op} succeeded.`);
 				await refreshAll();
 			} catch (err) {
 				void vscode.window.showErrorMessage(
-					`Searchlight: git ${op} failed — ${errMessage(err)}`,
+					`Lighthouse: git ${op} failed — ${errMessage(err)}`,
 				);
 			}
 		},
@@ -1286,6 +1286,6 @@ async function openTerminalHere(review?: Review): Promise<void> {
 		warnNoWorkspace();
 		return;
 	}
-	const terminal = vscode.window.createTerminal({ name: 'Searchlight · Terminal', cwd });
+	const terminal = vscode.window.createTerminal({ name: 'Lighthouse · Terminal', cwd });
 	terminal.show();
 }

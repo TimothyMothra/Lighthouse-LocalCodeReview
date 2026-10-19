@@ -15,13 +15,13 @@
       "comments": [
         {
           "id": "c-1",
-          "body": "Should the storage path be configurable, or is `.vscode/searchlight-reviews/` always fixed?",
+          "body": "Should the storage path be configurable, or is `.vscode/lighthouse-reviews/` always fixed?",
           "timestamp": "2026-07-03T08:00:00.000Z",
           "author": { "kind": "human", "name": "reviewer" }
         },
         {
           "id": "c-2",
-          "body": "Fixed for v0. We can add a `searchlight.storagePath` setting in v1 if needed.\n\n~Written by 🤖 Copilot",
+          "body": "Fixed for v0. We can add a `lighthouse.storagePath` setting in v1 if needed.\n\n~Written by 🤖 Copilot",
           "timestamp": "2026-07-03T08:05:00.000Z",
           "replyTo": "c-1",
           "author": {

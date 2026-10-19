@@ -7,9 +7,9 @@
  *   - nested comment rows (`author: first line`), timestamp (+ model/version for agents) description,
  *     and an author glyph (hubot/account),
  *   - click a thread/comment row -> jump to code; Read opens the file-independent conversation,
- *   - a separate Code button -> `searchlight.openThreadLocation` (jump to file:line),
- *   - inline resolve / unresolve button per thread → `searchlight.resolveThreadNode` /
- *     `searchlight.unresolveThreadNode` (the native inline `view/item/context` menus don't apply to
+ *   - a separate Code button -> `lighthouse.openThreadLocation` (jump to file:line),
+ *   - inline resolve / unresolve button per thread → `lighthouse.resolveThreadNode` /
+ *     `lighthouse.unresolveThreadNode` (the native inline `view/item/context` menus don't apply to
  *     a webview, so the row button replaces them).
  *
  * Parity-PLUS: per-comment `#tag` badges (from `comment.tags`) are rendered here even though the
@@ -66,13 +66,13 @@ type IncomingMessage =
 	| { type: 'rendered'; view: string; ms: number; count: number };
 
 /** workspaceState key persisting the show/hide-resolved toggle across reloads. */
-const HIDE_RESOLVED_KEY = 'searchlight.conversations.hideResolved';
+const HIDE_RESOLVED_KEY = 'lighthouse.conversations.hideResolved';
 
 /**
  * Context key backing the `view/title` show/hide-resolved buttons. Seeded on activation (not only on
  * toggle) so a user who reloads while resolved threads are hidden still gets the "Show" button.
  */
-const HIDE_RESOLVED_CONTEXT = 'searchlight.conversationsResolvedHidden';
+const HIDE_RESOLVED_CONTEXT = 'lighthouse.conversationsResolvedHidden';
 
 /** ASSUMPTION: hide resolved discussions initially; an explicit Show choice remains persistent. */
 export function isResolvedHidden(workspaceState: vscode.Memento): boolean {
@@ -109,15 +109,15 @@ export class ConversationsWebviewProvider implements vscode.WebviewViewProvider 
 					await this.postState('client-ready');
 					break;
 				case 'viewConversation':
-					await vscode.commands.executeCommand('searchlight.viewConversation', msg.target);
+					await vscode.commands.executeCommand('lighthouse.viewConversation', msg.target);
 					break;
 				case 'newConversation':
-					await vscode.commands.executeCommand('searchlight.newConversation');
+					await vscode.commands.executeCommand('lighthouse.newConversation');
 					break;
 				case 'navigate':
 					if (msg.filePath) {
 						await vscode.commands.executeCommand(
-							'searchlight.openThreadLocation',
+							'lighthouse.openThreadLocation',
 							msg.filePath,
 							msg.startLine,
 							msg.endLine,
@@ -127,14 +127,14 @@ export class ConversationsWebviewProvider implements vscode.WebviewViewProvider 
 				case 'resolve':
 					if (msg.threadId) {
 						// The command handler reads only `node?.thread?.id`; a stub satisfies it.
-						await vscode.commands.executeCommand('searchlight.resolveThreadNode', {
+						await vscode.commands.executeCommand('lighthouse.resolveThreadNode', {
 							thread: { id: msg.threadId },
 						});
 					}
 					break;
 				case 'unresolve':
 					if (msg.threadId) {
-						await vscode.commands.executeCommand('searchlight.unresolveThreadNode', {
+						await vscode.commands.executeCommand('lighthouse.unresolveThreadNode', {
 							thread: { id: msg.threadId },
 						});
 					}

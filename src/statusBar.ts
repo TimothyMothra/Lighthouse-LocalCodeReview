@@ -1,6 +1,6 @@
 /**
  * Status-bar item showing the active review as `src → tgt`. Clicking it runs the
- * `searchlight.switchReview` command. Hidden when no review exists.
+ * `lighthouse.switchReview` command. Hidden when no review exists.
  *
  * The "active review" is persisted per-workspace in a Memento (keyed by the review's directory).
  * When the stored dir no longer resolves to a review, the first discovered review is used.
@@ -12,14 +12,14 @@ import { Review } from './reviewModel';
 import { scanReviews } from './reviewStore';
 import { milestone, trace } from './diagnostics';
 
-const ACTIVE_KEY = 'searchlight.activeReviewDir';
+const ACTIVE_KEY = 'lighthouse.activeReviewDir';
 
 export class ReviewStatusBar implements vscode.Disposable {
 	private readonly item: vscode.StatusBarItem;
 
 	constructor(private readonly memento: vscode.Memento) {
 		this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-		this.item.command = 'searchlight.switchReview';
+		this.item.command = 'lighthouse.switchReview';
 	}
 
 	/** The persisted active-review directory, if any. */
@@ -68,7 +68,7 @@ export class ReviewStatusBar implements vscode.Disposable {
 		const src = review.sourceBranch ?? '?';
 		const tgt = review.targetBranch ?? '?';
 		this.item.text = `$(git-pull-request) ${src} → ${tgt}`;
-		this.item.tooltip = `Searchlight active review: ${src} → ${tgt}\nClick to switch review / branches`;
+		this.item.tooltip = `Lighthouse active review: ${src} → ${tgt}\nClick to switch review / branches`;
 		this.item.show();
 	}
 

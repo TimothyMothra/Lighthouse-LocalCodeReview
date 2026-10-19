@@ -35,7 +35,7 @@ type Row = 'base' | 'compare';
 
 export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 	private readonly metrics = new PaneMetrics('comparison');
-	static readonly viewType = 'searchlight.comparison';
+	static readonly viewType = 'lighthouse.comparison';
 
 	private view?: vscode.WebviewView;
 	private stateVersion = 0;
@@ -177,7 +177,7 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 		const match = worktrees.find((w) => w.branch === branch);
 		const path = match?.path ?? cwd;
 		if (!match) {
-			console.warn(`[searchlight] copyComparePath: branch ${branch} has no dedicated worktree; using repo root`);
+			console.warn(`[lighthouse] copyComparePath: branch ${branch} has no dedicated worktree; using repo root`);
 		}
 		await vscode.env.clipboard.writeText(path);
 		void vscode.window.showInformationMessage(`Copied path: ${path}`);
@@ -228,7 +228,7 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 					}
 					break;
 				case 'unpinBase':
-					await vscode.commands.executeCommand('searchlight.unpinBase');
+					await vscode.commands.executeCommand('lighthouse.unpinBase');
 					break;
 				case 'baseActionFeedback':
 				case 'baseActionSelector':
@@ -257,13 +257,13 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 					break;
 				case 'openCommitFile':
 					if (msg.sha && msg.relPath) {
-						await vscode.commands.executeCommand('searchlight.openCommitFileDiff', msg.sha, msg.relPath);
+						await vscode.commands.executeCommand('lighthouse.openCommitFileDiff', msg.sha, msg.relPath);
 					}
 					break;
 				}
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				console.error('[searchlight] Comparison selection failed:', error);
+				console.error('[lighthouse] Comparison selection failed:', error);
 				await this.postState();
 				void this.view?.webview.postMessage({ type: 'selectionError', message });
 			}
@@ -299,7 +299,7 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 			void this.view?.webview.postMessage({ type: 'commitPage', mode, sourceSha, baseSha, requestId, ...page });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			console.error('[searchlight] Commit lookup failed:', error);
+			console.error('[lighthouse] Commit lookup failed:', error);
 			void this.view?.webview.postMessage({ type: 'commitPage', mode, sourceSha, baseSha, requestId, error: message });
 		}
 	}
@@ -314,7 +314,7 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 			void this.view?.webview.postMessage({ type: 'files', sha, files });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			console.error('[searchlight] Commit file lookup failed:', error);
+			console.error('[lighthouse] Commit file lookup failed:', error);
 			void this.view?.webview.postMessage({ type: 'files', sha, error: message });
 		}
 	}

@@ -3,7 +3,7 @@
  *
  * Registers a CompletionItemProvider on the `comment` document scheme (the scheme VS Code uses for
  * comment-thread input editors), triggered by `/`. Offers the configured tag set
- * (`searchlight.tags`, default: idea question bug change todo nit praise). The selected tag is
+ * (`lighthouse.tags`, default: idea question bug change todo nit praise). The selected tag is
  * inserted as `/tag`; the CommentController's reply handler later extracts `/tag` tokens into the
  * thread's `tags[]` on submit.
  */
@@ -40,7 +40,7 @@ class TagCompletionProvider implements vscode.CompletionItemProvider {
 		}
 
 		const configured = vscode.workspace
-			.getConfiguration('searchlight')
+			.getConfiguration('lighthouse')
 			.get<string[]>('tags', DEFAULT_TAGS);
 		const tags = Array.isArray(configured) && configured.length > 0 ? configured : DEFAULT_TAGS;
 
@@ -52,7 +52,7 @@ class TagCompletionProvider implements vscode.CompletionItemProvider {
 			item.insertText = `/${tag}`;
 			item.filterText = `/${tag}`;
 			item.range = replaceRange;
-			item.detail = TAG_DETAIL[tag] ?? 'Searchlight tag';
+			item.detail = TAG_DETAIL[tag] ?? 'Lighthouse tag';
 			item.sortText = String(i).padStart(3, '0');
 			return item;
 		});

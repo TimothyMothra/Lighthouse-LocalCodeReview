@@ -1,7 +1,7 @@
 /**
- * Native `vscode.comments` integration for Searchlight.
+ * Native `vscode.comments` integration for Lighthouse.
  *
- * Renders every thread from every `.vscode/searchlight-reviews/<src>_<tgt>/comments.json` as an
+ * Renders every thread from every `.vscode/lighthouse-reviews/<src>_<tgt>/comments.json` as an
  * inline VS Code comment thread anchored at `filePath:startLine`. Supports:
  *   - replying (writes a v2 comment with `replyTo`),
  *   - starting a brand-new thread on any line (writes a v2 thread),
@@ -41,7 +41,7 @@ interface Rendered {
 	state: ReviewThread['state'];
 }
 
-/** Default tag set; overridable via the `searchlight.tags` setting. */
+/** Default tag set; overridable via the `lighthouse.tags` setting. */
 const DEFAULT_TAGS = ['idea', 'question', 'bug', 'change', 'todo', 'nit', 'praise'];
 
 /**
@@ -56,7 +56,7 @@ const DEFAULT_TAGS = ['idea', 'question', 'bug', 'change', 'todo', 'nit', 'prais
  */
 const RENDER_DEBOUNCE_MS = 200;
 
-export class SearchlightCommentController implements vscode.Disposable {
+export class LighthouseCommentController implements vscode.Disposable {
 	private readonly controller: vscode.CommentController;
 	/** Live threads keyed by `${reviewFile}::${threadId}` for cross-render reconciliation. */
 	private readonly rendered = new Map<string, Rendered>();
@@ -91,8 +91,8 @@ export class SearchlightCommentController implements vscode.Disposable {
 		private readonly ensureActive?: () => Promise<void>,
 	) {
 		this.controller = vscode.comments.createCommentController(
-			'searchlight',
-			'Searchlight Reviews',
+			'lighthouse',
+			'Lighthouse Reviews',
 		);
 		// Greyed-out placeholder in BOTH the new-thread and reply input boxes. Setting it on the
 		// controller's `options` covers every thread the controller owns, so it reminds the user of
@@ -130,7 +130,7 @@ export class SearchlightCommentController implements vscode.Disposable {
 	/** Configured tag set (falls back to the core set). */
 	private configuredTags(): string[] {
 		const raw = vscode.workspace
-			.getConfiguration('searchlight')
+			.getConfiguration('lighthouse')
 			.get<string[]>('tags', DEFAULT_TAGS);
 		return Array.isArray(raw) && raw.length > 0 ? raw : DEFAULT_TAGS;
 	}
@@ -146,14 +146,14 @@ export class SearchlightCommentController implements vscode.Disposable {
 	/** Whether thread materialization should be deferred off the activation critical path. */
 	private shouldDefer(): boolean {
 		return vscode.workspace
-			.getConfiguration('searchlight')
+			.getConfiguration('lighthouse')
 			.get<boolean>('deferThreadsOnLoad', true);
 	}
 
 	/**
 	 * Rebuild every inline thread from disk. Safe to call repeatedly (idempotent) — reconciles
 	 * against live threads instead of disposing+recreating everything, so unchanged threads never
-	 * flash. When `searchlight.deferThreadsOnLoad` is on and threads haven't been materialized yet,
+	 * flash. When `lighthouse.deferThreadsOnLoad` is on and threads haven't been materialized yet,
 	 * the first render is deferred off the activation path (see `armDeferredMaterialize`).
 	 */
 	async render(): Promise<void> {
@@ -420,7 +420,7 @@ export class SearchlightCommentController implements vscode.Disposable {
 			thread.comments.map((c) => this.toComment(c)),
 		);
 		vsThread.canReply = true;
-		vsThread.contextValue = 'searchlight.commentThread';
+		vsThread.contextValue = 'lighthouse.commentThread';
 		this.applyThreadState(vsThread, thread, index);
 		return vsThread;
 	}
@@ -485,7 +485,7 @@ export class SearchlightCommentController implements vscode.Disposable {
 		// Reject whitespace-only (or tag-only) bodies — never persist an empty comment/thread.
 		if (body.trim().length === 0) {
 			reply.thread.dispose();
-			vscode.window.setStatusBarMessage('Searchlight: empty comment ignored.', 2000);
+			vscode.window.setStatusBarMessage('Lighthouse: empty comment ignored.', 2000);
 			return;
 		}
 
@@ -526,14 +526,14 @@ export class SearchlightCommentController implements vscode.Disposable {
 		const review = active?.review ?? reviews[0];
 		if (!review) {
 			vscode.window.showWarningMessage(
-				'Searchlight: no review target found. Open a comparison or create .vscode/searchlight-reviews/<src>_<tgt>/comments.json first.',
+				'Lighthouse: no review target found. Open a comparison or create .vscode/lighthouse-reviews/<src>_<tgt>/comments.json first.',
 			);
 			return;
 		}
 		// Note when the target differs from a single on-disk review (multiple files present).
 		if (!active?.review && reviews.length > 1) {
 			vscode.window.showInformationMessage(
-				`Searchlight: added the new thread to ${path.basename(path.dirname(review.sourceFile))}.`,
+				`Lighthouse: added the new thread to ${path.basename(path.dirname(review.sourceFile))}.`,
 			);
 		}
 		const rel = this.toWorkspaceRelative(reply.thread.uri);

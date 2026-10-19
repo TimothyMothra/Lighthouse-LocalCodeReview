@@ -37,7 +37,7 @@ function memento() {
 }
 
 async function repository(t) {
-	const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'searchlight-ancestry-'));
+	const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'lighthouse-ancestry-'));
 	t.after(() => fs.rm(cwd, { recursive: true, force: true }));
 	const metadata = path.join(cwd, '.git');
 	await fs.mkdir(path.join(metadata, 'objects'), { recursive: true });
@@ -295,7 +295,7 @@ test('provider transports history, pinned selections, and explicit stale-source 
 	assert.deepEqual(messages.at(-1).commits.map((c) => c.sha), [r.child, r.parent, r.main]);
 	await provider.setCommitAsBase({ sha: r.parent, webviewSection: 'commit' });
 	t.mock.method(vscode.commands, 'executeCommand', async (command) => {
-		assert.equal(command, 'searchlight.unpinBase');
+		assert.equal(command, 'lighthouse.unpinBase');
 		await provider.unpinBase(() => active.useAutomaticBase());
 	});
 	await receive({ type: 'unpinBase' });
@@ -781,10 +781,10 @@ test('compact commit expansion preserves file diffs, focus and collapse-all', ()
 
 test('manifest folds Commits into Comparison and scopes Set as Base to commit rows', () => {
 	const manifest = require('../package.json');
-	assert.deepEqual(manifest.contributes.views.searchlight.map((view) => view.id),
-		['searchlight.comparison', 'searchlight.files', 'searchlight.conversations']);
-	const menu = manifest.contributes.menus['webview/context'].find((item) => item.command === 'searchlight.setCommitAsBase');
-	assert.equal(menu.when, 'webviewId == searchlight.comparison && webviewSection == commit');
+	assert.deepEqual(manifest.contributes.views.lighthouse.map((view) => view.id),
+		['lighthouse.comparison', 'lighthouse.files', 'lighthouse.conversations']);
+	const menu = manifest.contributes.menus['webview/context'].find((item) => item.command === 'lighthouse.setCommitAsBase');
+	assert.equal(menu.when, 'webviewId == lighthouse.comparison && webviewSection == commit');
 	assert.equal(manifest.contributes.commands.find((command) => command.command === menu.command).title, 'Set as Base');
 });
 

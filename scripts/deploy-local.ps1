@@ -1,10 +1,10 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-    Build the Searchlight extension and install it into local (host) VS Code.
+    Build the Lighthouse extension and install it into local (host) VS Code.
 
 .DESCRIPTION
-    Compiles + packages the extension into searchlight-0.0.1.vsix (at repo root,
+    Compiles + packages the extension into lighthouse-0.0.1.vsix (at repo root,
     already gitignored) and installs it with `code --install-extension ... --force`.
 
 .PARAMETER InstallOnly
@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 
 # Repo root = parent of this script's directory, so cwd doesn't matter.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$vsix = Join-Path $repoRoot 'searchlight-0.0.1.vsix'
+$vsix = Join-Path $repoRoot 'lighthouse-0.0.1.vsix'
 
 Push-Location $repoRoot
 try {
@@ -56,8 +56,8 @@ try {
     & $codeCmd --install-extension $vsix --force
     if ($LASTEXITCODE -ne 0) { throw "code --install-extension failed (exit $LASTEXITCODE)." }
 
-    Write-Host "==> Installed extensions matching 'searchlight':" -ForegroundColor Cyan
-    & $codeCmd --list-extensions --show-versions | Select-String -Pattern 'searchlight'
+    Write-Host "==> Installed extensions matching 'lighthouse':" -ForegroundColor Cyan
+    & $codeCmd --list-extensions --show-versions | Select-String -Pattern 'lighthouse'
 
     Write-Host ""
     Write-Host "Done. In VS Code run 'Developer: Reload Window' to pick up the new build." -ForegroundColor Green

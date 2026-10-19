@@ -1,7 +1,7 @@
 import { now } from './diagnostics';
 
 export type PaneName = 'comparison' | 'files' | 'commits' | 'conversations';
-export type EditorContext = 'searchlight-diff' | 'searchlight-conversation' | 'git-diff' | 'text-editor' | 'other' | 'none';
+export type EditorContext = 'lighthouse-diff' | 'lighthouse-conversation' | 'git-diff' | 'text-editor' | 'other' | 'none';
 
 type UsageEvent =
 	| 'command.started'
@@ -145,7 +145,7 @@ interface UsageSnapshotFocus {
 }
 
 const PANES: PaneName[] = ['comparison', 'files', 'commits', 'conversations'];
-const COMMAND_RE = /^searchlight\.[A-Za-z0-9]+$/;
+const COMMAND_RE = /^lighthouse\.[A-Za-z0-9]+$/;
 const ACTIONS = new Set([
 	'selectBase', 'selectCompare', 'pullBase', 'pullCompare', 'pinBaseline', 'autoBaseline', 'unpinBase',
 	'refreshBranches', 'viewConversation', 'toggleReviewed', 'openFile', 'openUncommitted', 'openCumulative',
@@ -215,7 +215,7 @@ function emptyCountState(): CountState {
 function emptyContextCounts(): Record<EditorContext, ContextCounts> {
 	const empty = (): ContextCounts => ({ commands: {}, discussions: emptyDiscussionCounts() });
 	return {
-		'searchlight-diff': empty(), 'searchlight-conversation': empty(), 'git-diff': empty(), 'text-editor': empty(),
+		'lighthouse-diff': empty(), 'lighthouse-conversation': empty(), 'git-diff': empty(), 'text-editor': empty(),
 		other: empty(), none: empty(),
 	};
 }
@@ -231,8 +231,8 @@ function emptyPaneStateMap(): Record<PaneName, PaneState> {
 
 function emptyEditorStateMap(): Record<EditorContext, EditorState> {
 	return {
-		'searchlight-diff': { ...emptyCountState(), context: 'searchlight-diff', visibleMs: 0 },
-		'searchlight-conversation': { ...emptyCountState(), context: 'searchlight-conversation', visibleMs: 0 },
+		'lighthouse-diff': { ...emptyCountState(), context: 'lighthouse-diff', visibleMs: 0 },
+		'lighthouse-conversation': { ...emptyCountState(), context: 'lighthouse-conversation', visibleMs: 0 },
 		'git-diff': { ...emptyCountState(), context: 'git-diff', visibleMs: 0 },
 		'text-editor': { ...emptyCountState(), context: 'text-editor', visibleMs: 0 },
 		other: { ...emptyCountState(), context: 'other', visibleMs: 0 },
@@ -467,8 +467,8 @@ function snapshotPaneMap() {
 
 function snapshotEditorMap() {
 	return {
-		'searchlight-diff': editorSnapshot('searchlight-diff'),
-		'searchlight-conversation': editorSnapshot('searchlight-conversation'),
+		'lighthouse-diff': editorSnapshot('lighthouse-diff'),
+		'lighthouse-conversation': editorSnapshot('lighthouse-conversation'),
 		'git-diff': editorSnapshot('git-diff'),
 		'text-editor': editorSnapshot('text-editor'),
 		other: editorSnapshot('other'),

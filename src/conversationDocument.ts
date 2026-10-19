@@ -4,7 +4,7 @@ import { ConversationTarget, conversationFingerprint, formatConversation } from 
 import { loadReview } from './reviewStore';
 import { event, trace } from './diagnostics';
 
-export const CONVERSATION_SCHEME = 'searchlight-conversation';
+export const CONVERSATION_SCHEME = 'lighthouse-conversation';
 
 export function parseConversationTarget(value: unknown): ConversationTarget {
 	if (typeof value !== 'object' || value === null ||
@@ -37,9 +37,9 @@ export function validateConversationReviewFile(reviewFile: string): void {
 		const normalized = process.platform === 'win32' ? relative.toLowerCase() : relative;
 		const parts = normalized.split(path.sep);
 		return !path.isAbsolute(relative) && parts.length >= 3 &&
-			parts[0] === '.vscode' && parts[1] === 'searchlight-reviews' && parts[parts.length - 1] === 'comments.json';
+			parts[0] === '.vscode' && parts[1] === 'lighthouse-reviews' && parts[parts.length - 1] === 'comments.json';
 	});
-	if (!valid) { throw new Error('The thread must belong to a Searchlight review in this workspace.'); }
+	if (!valid) { throw new Error('The thread must belong to a Lighthouse review in this workspace.'); }
 }
 
 export class ConversationDocumentProvider implements vscode.TextDocumentContentProvider, vscode.Disposable {

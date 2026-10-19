@@ -1,16 +1,16 @@
 # Startup diagnostics
 
-Searchlight records local startup diagnostics when `searchlight.perfLogging` is enabled (default
+Lighthouse records local startup diagnostics when `lighthouse.perfLogging` is enabled (default
 `true`). It does not send telemetry anywhere. Timings use a monotonic clock; every record has a
 run ID and milliseconds since entry into `activate()`.
 
 ## Capture a baseline
 
-1. Install the build to measure and enable `searchlight.perfLogging` **before** reloading.
-2. Keep the workspace, pane visibility, expanded sections, open editors, and Searchlight settings
+1. Install the build to measure and enable `lighthouse.perfLogging` **before** reloading.
+2. Keep the workspace, pane visibility, expanded sections, open editors, and Lighthouse settings
    consistent. Record separately whether the run was a full VS Code launch or **Reload Window**.
-3. Open **Output > Searchlight**. `[perf]` lines contain JSON events and span starts/ends.
-4. After the visible panes settle, run **Searchlight: Export Startup Diagnostics** and choose a
+3. Open **Output > Lighthouse**. `[perf]` lines contain JSON events and span starts/ends.
+4. After the visible panes settle, run **Lighthouse: Export Startup Diagnostics** and choose a
    JSON file outside the repository. Also export during a stall: pending spans and unacknowledged
    pane deliveries are included.
 5. Repeat several times for both cold launches and warm reloads. Compare median/range rather than
@@ -115,7 +115,7 @@ an expected negative query result (for example, an ancestry check), not necessar
 
 ## Pin and Unpin latency
 
-Use the same **Output > Searchlight** log or exported report while `searchlight.perfLogging` is on.
+Use the same **Output > Lighthouse** log or exported report while `lighthouse.perfLogging` is on.
 The original `[usage]` command start/completion events can estimate action time, but do not include
 all subsequent webview work. The following `[perf]` boundaries make the distinction explicit:
 
@@ -138,8 +138,8 @@ kinds/IDs, cache outcomes, and elapsed times, never target names, SHAs or review
 
 ## Reviewed-file troubleshooting
 
-Reviewed-file diagnostics use the same `searchlight.perfLogging` setting, **Output > Searchlight**,
-and **Searchlight: Export Startup Diagnostics** command. Leave logging enabled before reproducing.
+Reviewed-file diagnostics use the same `lighthouse.perfLogging` setting, **Output > Lighthouse**,
+and **Lighthouse: Export Startup Diagnostics** command. Leave logging enabled before reproducing.
 The exported records use anonymous `fileId`, `comparisonGeneration` and `passId` fields rather than
 filenames, commit IDs or fingerprints. Local Output also prints `[reviewed]` file-ID mappings to
 repository-relative filenames so you can identify the affected file; those mapping lines are
@@ -182,7 +182,7 @@ remains separately observable. The old `firstPaint` label has been removed becau
 only a loading placeholder.
 
 The host CPU/memory/event-loop samples belong to the **whole extension-host process**, including
-other extensions; they cannot attribute CPU usage to Searchlight or prove an antivirus cause.
+other extensions; they cannot attribute CPU usage to Lighthouse or prove an antivirus cause.
 These timings start at `activate()`, not at VS Code process creation or module loading. Pair the
 capture with **Developer: Startup Performance**, **Developer: Show Running Extensions** and an
 extension-host profile for those costs. OS tracing is needed to establish Defender/I/O causality.

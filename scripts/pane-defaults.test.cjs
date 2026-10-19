@@ -25,7 +25,7 @@ function fixture(name) {
 	};
 	const exports = loadCompiled(name, {
 		vscode: { commands: { executeCommand: async (...args) => commands.push(args) } },
-		'./reviewStore': {}, './reviewDiff': { DIFF_SCHEME: 'searchlight-diff' },
+		'./reviewStore': {}, './reviewDiff': { DIFF_SCHEME: 'lighthouse-diff' },
 		'./webviewMetrics': {
 			PaneMetrics: class { post(state) { states.push(state); } build(work) { return work(); } },
 			logBuild() {},
@@ -53,16 +53,16 @@ function client(html) {
 }
 
 test('panes put collapsed combined Comparison above Files and Conversations', () => {
-	const views = manifest.contributes.views.searchlight;
+	const views = manifest.contributes.views.lighthouse;
 	assert.deepEqual(views.map((view) => view.id), [
-		'searchlight.comparison', 'searchlight.files', 'searchlight.conversations',
+		'lighthouse.comparison', 'lighthouse.files', 'lighthouse.conversations',
 	]);
 	assert.equal(views[0].visibility, 'collapsed');
 	assert.ok(views.slice(1).every((view) => !view.visibility || view.visibility === 'visible'));
 	const buttons = manifest.contributes.menus['view/title'];
-	assert.ok(!buttons.some((button) => button.command === 'searchlight.commitsViewAllChanges' && button.when.includes('searchlight.files')));
+	assert.ok(!buttons.some((button) => button.command === 'lighthouse.commitsViewAllChanges' && button.when.includes('lighthouse.files')));
 	// Only the unused button is removed; the command remains available from the command palette.
-	assert.ok(manifest.contributes.commands.some((command) => command.command === 'searchlight.commitsViewAllChanges'));
+	assert.ok(manifest.contributes.commands.some((command) => command.command === 'lighthouse.commitsViewAllChanges'));
 });
 
 test('Commits and Changed Files use downward artwork rotated right only when collapsed', () => {
@@ -115,13 +115,13 @@ test('Conversations hides resolved threads by default and preserves an explicit 
 	const f = fixture('conversationsWebview');
 	assert.equal(f.exports.isResolvedHidden(f.memento), true);
 	await f.exports.syncResolvedContext(f.memento);
-	assert.deepEqual(f.commands.at(-1), ['setContext', 'searchlight.conversationsResolvedHidden', true]);
+	assert.deepEqual(f.commands.at(-1), ['setContext', 'lighthouse.conversationsResolvedHidden', true]);
 	const provider = new f.exports.ConversationsWebviewProvider(() => undefined, f.memento);
 	const ui = client(provider.html({ cspSource: 'fixture' }));
 	assert.equal(ui.state('hideResolved'), true);
 	await provider.setHideResolved(false);
 	assert.equal(f.exports.isResolvedHidden(f.memento), false);
-	assert.deepEqual(f.commands.at(-1), ['setContext', 'searchlight.conversationsResolvedHidden', false]);
+	assert.deepEqual(f.commands.at(-1), ['setContext', 'lighthouse.conversationsResolvedHidden', false]);
 	ui.send({ type: 'state', threads: [], hideResolved: false });
 	assert.equal(ui.state('hideResolved'), false);
 });

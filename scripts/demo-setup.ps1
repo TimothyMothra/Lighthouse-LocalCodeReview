@@ -1,15 +1,15 @@
 <#
 .SYNOPSIS
-    One-command, PII-free demo repo for capturing a Searchlight screenshot.
+    One-command, PII-free demo repo for capturing a Lighthouse screenshot.
 
 .DESCRIPTION
     Produces a self-contained throwaway git repo with:
       * a base branch (`main`) and a compare branch (`feature/demo`),
       * a handful of changed files across NESTED folders (so the Changed Files
         pane renders a real tree),
-      * 2 commits on the compare branch, and
-      * a seeded v2 `.vscode/searchlight-reviews/feature-demo_main/` review
-        (comments.json + registry.json) so all four panes are populated.
+      * 2 feature commits plus a seeded-review commit on the compare branch, and
+      * a seeded v2 `.vscode/lighthouse-reviews/feature-demo_main/` review
+        (comments.json + registry.json) so all three panes are populated.
 
     The seeded review contains ZERO PII: neutral human author "reviewer" and an
     agent author block for "Copilot". It follows the v2 schema in
@@ -20,21 +20,21 @@
 
 .PARAMETER Path
     Destination folder for the throwaway demo repo.
-    Default: "$env:TEMP\searchlight-demo".
+    Default: "$env:TEMP\lighthouse-demo".
 
 .PARAMETER Force
     Delete the destination folder first if it already exists.
 
 .EXAMPLE
     pwsh -File scripts\demo-setup.ps1
-    Creates the demo at $env:TEMP\searchlight-demo, ready to open in VS Code.
+    Creates the demo at $env:TEMP\lighthouse-demo, ready to open in VS Code.
 
 .EXAMPLE
-    pwsh -File scripts\demo-setup.ps1 -Path C:\temp\sl-demo -Force
+    pwsh -File scripts\demo-setup.ps1 -Path C:\temp\lighthouse-demo -Force
 #>
 [CmdletBinding()]
 param(
-    [string] $Path = (Join-Path $env:TEMP 'searchlight-demo'),
+    [string] $Path = (Join-Path $env:TEMP 'lighthouse-demo'),
     [switch] $Force
 )
 
@@ -66,7 +66,7 @@ if (Test-Path $Path) {
 }
 
 New-Item -ItemType Directory -Path $Path -Force | Out-Null
-Write-Host "Creating Searchlight demo repo at: $Path" -ForegroundColor Cyan
+Write-Host "Creating Lighthouse demo repo at: $Path" -ForegroundColor Cyan
 
 Push-Location $Path
 try {
@@ -79,7 +79,7 @@ try {
     Write-DemoFile 'README.md' @'
 # Widget Service
 
-A tiny demo service used to showcase the Searchlight local code review flow.
+A tiny demo service used to showcase the Lighthouse local code review flow.
 '@
 
     Write-DemoFile 'src/api/handlers.ts' @'
@@ -155,8 +155,8 @@ test("throws when widget missing", () => {
     $compareSha = (git rev-parse 'feature/demo').Trim()
 
     # --- 4. seed a PII-free v2 review (feature/demo vs main) -----------------
-    # Layout: .vscode/searchlight-reviews/<compare>_<base>/  ("/" -> "-")
-    $reviewDir = '.vscode/searchlight-reviews/feature-demo_main'
+    # Layout: .vscode/lighthouse-reviews/<compare>_<base>/  ("/" -> "-")
+    $reviewDir = '.vscode/lighthouse-reviews/feature-demo_main'
 
     # Single-quoted here-string: backticks, $ and {} in the JSON body stay
     # literal. SHA placeholders are substituted afterwards.
@@ -186,15 +186,15 @@ test("throws when widget missing", () => {
         },
         {
           "id": "c-2",
-          "body": "Good catch. Updated to throw new Error(`widget ${id} not found`) so the id is preserved in logs.\n\n~Written by 🤖 Copilot",
+          "body": "Agreed. Include the widget id in the error message, then assert that context in the missing-widget test.\n\n~Written by 🤖 Copilot",
           "timestamp": "2026-07-03T09:04:00.000Z",
           "replyTo": "c-1",
           "author": {
             "kind": "agent",
             "name": "Copilot",
-            "model": "Claude Opus 4.8",
+            "model": "Demo model",
             "reasoning": "high",
-            "version": "1.0.69"
+            "version": "demo"
           }
         }
       ]
@@ -258,7 +258,7 @@ test("throws when widget missing", () => {
 
     # commit the seeded review so `git status` in the demo repo is clean
     git add -A
-    git commit -q -m 'Seed Searchlight review for demo'
+    git commit -q -m 'Seed Lighthouse review for demo'
 
     # leave the compare branch checked out so the extension picks up feature/demo
     git checkout -q feature/demo
@@ -273,9 +273,9 @@ Write-Host ''
 Write-Host 'Next steps to capture the screenshot:' -ForegroundColor Cyan
 Write-Host '  1. Install the extension (from this repo):  pwsh -File scripts\deploy-local.ps1'
 Write-Host "  2. Open the demo folder in VS Code:         code `"$Path`""
-Write-Host '  3. Run "Searchlight: Start Review" (or open the Searchlight panel) and'
+Write-Host '  3. Open the Lighthouse panel, expand Comparison, and'
 Write-Host '     compare  feature/demo  ->  main.'
-Write-Host '  4. Frame the 4 panes (Comparison / Changed Files / Commits / Conversations);'
+Write-Host '  4. Frame the 3 panes (Comparison with Commits / Changed Files / Threads);'
 Write-Host '     the "src/api/handlers.ts" [bug] thread shows the human + Copilot reply.'
 Write-Host '  5. Save the screenshot to:  docs\images\screenshot.png  (in THIS repo).'
 Write-Host ''

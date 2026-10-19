@@ -115,7 +115,7 @@ export function webviewHtml(opts: WebviewHtmlOptions): string {
 	// Baked render-timing shell. Defines the vscode handle + `reportRendered` used by every pane.
 	const shellScript = /* js */ `
   const vscode = acquireVsCodeApi();
-  const __searchlightView = ${JSON.stringify(viewName)};
+  const __lighthouseView = ${JSON.stringify(viewName)};
   // Post the client-side render duration back to the host for the metrics protocol.
   // Panes capture \`const t0 = performance.now()\` when a {type:'state',...} message arrives,
   // render, then call reportRendered(view, count, t0).

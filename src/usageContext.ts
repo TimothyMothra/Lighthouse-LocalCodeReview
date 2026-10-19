@@ -31,24 +31,24 @@ export function editorInputIdentity(input: unknown): string {
 export function classifyEditorInput(input: unknown): EditorContext {
 	if (input === undefined || input === null) { return 'none'; }
 	if (typeof input !== 'object') { return 'other'; }
-	if ('viewType' in input && input.viewType === 'searchlight.conversationPage') { return 'searchlight-conversation'; }
+	if ('viewType' in input && input.viewType === 'lighthouse.conversationPage') { return 'lighthouse-conversation'; }
 	if ('original' in input && 'modified' in input) {
 		const schemes = [scheme(input.original), scheme(input.modified)];
-		if (schemes.includes('searchlight-diff')) { return 'searchlight-diff'; }
+		if (schemes.includes('lighthouse-diff')) { return 'lighthouse-diff'; }
 		// ASSUMPTION: git:// diffs are Git-backed editors, not proof the SCM sidebar was clicked.
 		if (schemes.includes('git')) { return 'git-diff'; }
 		return 'other';
 	}
 	if ('textDiffs' in input && Array.isArray(input.textDiffs)) {
 		const contexts = input.textDiffs.map(classifyEditorInput);
-		if (contexts.includes('searchlight-diff')) { return 'searchlight-diff'; }
+		if (contexts.includes('lighthouse-diff')) { return 'lighthouse-diff'; }
 		if (contexts.includes('git-diff')) { return 'git-diff'; }
 		return 'other';
 	}
 	if ('uri' in input) {
 		const value = scheme(input.uri);
-		if (value === 'searchlight-conversation') { return 'searchlight-conversation'; }
-		if (value === 'searchlight-diff') { return 'searchlight-diff'; }
+		if (value === 'lighthouse-conversation') { return 'lighthouse-conversation'; }
+		if (value === 'lighthouse-diff') { return 'lighthouse-diff'; }
 		if (value === 'git') { return 'git-diff'; }
 		if (value === 'file' || value === 'vscode-remote' || value === 'untitled') { return 'text-editor'; }
 	}

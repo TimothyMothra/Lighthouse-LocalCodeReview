@@ -8,7 +8,7 @@ const diagnostics = require('../out/diagnostics');
 
 function fixture(names = ['workspace']) {
 	const folders = names.map((name) => path.resolve(name));
-	const roots = folders.map((folder) => path.join(folder, '.vscode', 'searchlight-reviews'));
+	const roots = folders.map((folder) => path.join(folder, '.vscode', 'lighthouse-reviews'));
 	const directories = new Map(), files = new Map(), reads = [];
 	const uri = (fsPath) => ({ fsPath, toString: () => fsPath });
 	let readDirectory = async (value) => {
@@ -65,6 +65,20 @@ test('missing stores are empty, but permission failures are propagated rather th
 	const failure = Object.assign(new Error('access denied'), { code: 'NoPermissions' });
 	f.directories.set(f.roots[0], failure);
 	await assert.rejects(f.store.scanReviews(), (error) => error === failure);
+});
+
+test('Lighthouse discovers its own reviews without reading unrelated or third-party stores', async () => {
+	const f = fixture();
+	const workspace = path.dirname(path.dirname(f.roots[0]));
+	// Unrelated namespaces stand in for any other installation's store.
+	for (const name of ['lighthouse-reviews', 'unrelated-reviews', 'local-reviews']) {
+		const root = path.join(workspace, '.vscode', name);
+		f.directories.set(root, [['comments.json', 1]]);
+		f.files.set(path.join(root, 'comments.json'), JSON.stringify({ threads: [{ id: name, comments: [] }] }));
+	}
+	const reviews = await f.store.scanReviews();
+	assert.deepEqual(reviews.map((review) => review.threads[0].id), ['lighthouse-reviews']);
+	assert.deepEqual(f.reads, f.roots);
 });
 
 test('concurrent readers share discovery, get independent review models, and see new folders on later scans', async () => {

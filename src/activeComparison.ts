@@ -1,5 +1,5 @@
 /**
- * The in-memory "active comparison" — the single source of truth all Searchlight views read.
+ * The in-memory "active comparison" — the single source of truth all Lighthouse views read.
  *
  * A comparison is defined by a `base` (TARGET branch or pinned commit) and a `compare` (SOURCE branch = the changes
  * under review). It maps onto the on-disk review schema as `sourceBranch = compare`,
@@ -103,7 +103,7 @@ export class ActiveComparison {
 	private commitsTruncated = false;
 
 	constructor(
-		/** Workspace folder that owns `.vscode/searchlight-reviews`. */
+		/** Workspace folder that owns `.vscode/lighthouse-reviews`. */
 		public readonly workspaceFolderFsPath: string,
 		/**
 		 * Git repository root (cwd for all git operations). Mutable so activation can construct
@@ -120,11 +120,11 @@ export class ActiveComparison {
 	}
 
 	private pinKey(base: string, compare: string): string {
-		return `searchlight.baselinePin.${JSON.stringify([base, compare])}`;
+		return `lighthouse.baselinePin.${JSON.stringify([base, compare])}`;
 	}
 
 	private targetKey(compare: string): string {
-		return `searchlight.target.${JSON.stringify(compare)}`;
+		return `lighthouse.target.${JSON.stringify(compare)}`;
 	}
 
 	private invalidateBaseline(): void {
@@ -188,7 +188,7 @@ export class ActiveComparison {
 			return await trace('comparison.targetDiscovery', () =>
 				suggestBaseBranch(this.repoRootFsPath, compare, snapshot?.refs, snapshotSource(snapshot, compare)));
 		} catch (error) {
-			console.error('[searchlight] Target discovery failed:', error);
+			console.error('[lighthouse] Target discovery failed:', error);
 			return {
 				branch: await defaultBaseBranch(this.repoRootFsPath),
 				explanation: `Target discovery failed: ${error instanceof Error ? error.message : String(error)} Using the repository default.`,

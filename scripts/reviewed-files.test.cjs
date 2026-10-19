@@ -31,7 +31,7 @@ function load(name, mocks, bindings = {}) {
 }
 
 async function fixture(t, initial = {}, timing) {
-	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'searchlight-reviewed-'));
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lighthouse-reviewed-'));
 	let coordinator;
 	const readers = [];
 	t.after(async () => {
@@ -234,7 +234,7 @@ test('reader reset reuses immutable metadata while a different comparison folder
 	reader.reset();
 	await reader.read(context, 'file.ts');
 	assert.equal(f.calls.trees, trees);
-	const other = { ...context, file: path.join(f.root, '.vscode', 'searchlight-reviews', 'other_main', 'comments.json') };
+	const other = { ...context, file: path.join(f.root, '.vscode', 'lighthouse-reviews', 'other_main', 'comments.json') };
 	await reader.read(other, 'file.ts'); await reader.flushMetadata();
 	assert.equal(f.calls.trees, trees + 2);
 	assert.equal((await fs.stat(path.join(path.dirname(other.file), 'metadata-cache.json'))).isFile(), true);
@@ -506,7 +506,7 @@ test('switching reviews while a check is in flight cannot write the new review o
 	const checking = f.coordinator.setReviewed('file.ts', true, f.coordinator.key);
 	const rejected = assert.rejects(checking, /file or comparison changed/i);
 	await start;
-	f.active.sourceFile = path.join(f.root, '.vscode', 'searchlight-reviews', 'another_main', 'comments.json');
+	f.active.sourceFile = path.join(f.root, '.vscode', 'lighthouse-reviews', 'another_main', 'comments.json');
 	f.active.review = { ...f.store.emptyReview(f.root, 'another', 'main', B, A), sourceFile: f.active.sourceFile };
 	f.coordinator.reconcile('select-compare');
 	release(); await rejected;
@@ -541,7 +541,7 @@ test('unsupported submodules are explicit and directory links cannot escape the 
 	assert.equal(f.writes.length, 0);
 	f.tables.get(A).set('file.ts', entry());
 	f.coordinator.reader.reset();
-	const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'searchlight-reviewed-outside-'));
+	const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'lighthouse-reviewed-outside-'));
 	t.after(() => fs.rm(outside, { recursive: true, force: true }));
 	await fs.writeFile(path.join(outside, 'file.ts'), 'external');
 	await fs.symlink(outside, path.join(f.root, 'linked'), 'junction');
@@ -549,7 +549,7 @@ test('unsupported submodules are explicit and directory links cannot escape the 
 });
 
 test('literal NUL-safe Git queries and binary blob hashing read a disposable object database', async (t) => {
-	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'searchlight-reviewed-git-'));
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lighthouse-reviewed-git-'));
 	t.after(() => fs.rm(root, { recursive: true, force: true }));
 	const metadata = path.join(root, '.git');
 	await fs.mkdir(path.join(metadata, 'objects'), { recursive: true });
@@ -582,7 +582,7 @@ test('literal NUL-safe Git queries and binary blob hashing read a disposable obj
 
 test('real Files client disables both checkbox variants and exposes the unsaved explanation without repainting', () => {
 	const { FilesWebviewProvider } = load('filesWebview', {
-		vscode: {}, './reviewDiff': { DIFF_SCHEME: 'searchlight-diff' },
+		vscode: {}, './reviewDiff': { DIFF_SCHEME: 'lighthouse-diff' },
 		'./webviewMetrics': { PaneMetrics: class {}, logBuild() {} },
 	});
 	const provider = new FilesWebviewProvider(() => undefined, {}, () => {}, {});

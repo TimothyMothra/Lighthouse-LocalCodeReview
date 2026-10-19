@@ -1,7 +1,7 @@
-# Searchlight: Local Code Review — VS Code Extension (scoping)
+# Lighthouse: Local Code Review — VS Code Extension (scoping)
 
-**Product name:** **Searchlight: Local Code Review**
-**Project location:** `C:\REPOS\searchlight-localcodereview\` (own git repo; NOT part of SFC.Client.SFUI).
+**Product name:** **Lighthouse: Local Code Review**
+**Project location:** `C:\REPOS\lighthouse-localcodereview\` (own git repo; NOT part of SFC.Client.SFUI).
 **Status:** v1 MVP + v1.5 shipped (2026-07-03). Local-only; publishing out of scope.
 **Inspired by:** `Gururagavendra.local-pr-review` (marketplace). We build a *superset* that stays
 schema-compatible with its `.vscode/local-reviews/` files (which Copilot already reads via
@@ -14,10 +14,10 @@ storage path so it never clobbers the original.
 - **Trigger = "Ask Copilot to review" button** → shells out to the `copilot` CLI with a prompt that
   points at the review folder + thread id. Agent responds by editing `comments.json`.
 - **UI = native `vscode.comments` CommentController** (recommended path) + sidebar TreeView + status bar.
-- **Storage path = `.vscode/searchlight-reviews/`** (NEW — does not clobber the original's
+- **Storage path = `.vscode/lighthouse-reviews/`** (NEW — does not clobber the original's
   `.vscode/local-reviews/`). Same internal file layout so the schema/tooling is shared.
   - ⚠️ Followup: `local-pr-review.instructions.md` currently points Copilot at `.vscode/local-reviews/`
-    only. It must be extended to also read `.vscode/searchlight-reviews/` before the agent round-trip works.
+    only. It must be extended to also read `.vscode/lighthouse-reviews/` before the agent round-trip works.
 
 ## Architecture (ownership split)
 ```
@@ -111,15 +111,15 @@ and re-renders threads. (No model API keys, no in-extension LM calls.)
   Copilot side are already designed.)
 
 ## Open questions — RESOLVED (2026-07-03)
-1. ✅ **Project location:** `C:\REPOS\searchlight-localcodereview\` (own git repo, separate from SFC.Client.SFUI).
+1. ✅ **Project location:** `C:\REPOS\lighthouse-localcodereview\` (own git repo, separate from SFC.Client.SFUI).
 2. ✅ **UI surface:** native `vscode.comments` CommentController (+ TreeView + status bar).
-3. ✅ **Storage path:** new `.vscode/searchlight-reviews/` — do NOT clobber the original.
-   Product renamed to **"Searchlight: Local Code Review"**.
+3. ✅ **Storage path:** new `.vscode/lighthouse-reviews/` — do NOT clobber the original.
+   Product renamed to **"Lighthouse: Local Code Review"**.
 
 ## Next step
-Scaffold v0 at `C:\REPOS\searchlight-localcodereview\`:
-- `yo code` (TypeScript extension) → identifiers: display name "Searchlight: Local Code Review",
-  id `searchlight`, publisher placeholder (local-only, unpublished).
+Scaffold v0 at `C:\REPOS\lighthouse-localcodereview\`:
+- `yo code` (TypeScript extension) → identifiers: display name "Lighthouse: Local Code Review",
+  id `lighthouse`, publisher placeholder (local-only, unpublished).
 - `git init`, first commit of the scaffold.
-- v0 goal: read + render existing `.vscode/searchlight-reviews/**/comments.json` in a TreeView.
-- Register `C:\REPOS\searchlight-localcodereview\` as a Copilot **project** so a coding session owns the build going forward.
+- v0 goal: read + render existing `.vscode/lighthouse-reviews/**/comments.json` in a TreeView.
+- Register `C:\REPOS\lighthouse-localcodereview\` as a Copilot **project** so a coding session owns the build going forward.

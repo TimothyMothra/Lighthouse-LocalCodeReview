@@ -4,14 +4,17 @@ The canonical README screenshot lives at **`docs/images/screenshot.png`** (refer
 top-level `README.md`). Generate its dataset with the one-command demo script:
 
 ```powershell
-pwsh -File scripts\deploy-local.ps1        # install the extension into local VS Code
-pwsh -File scripts\demo-setup.ps1 -Force   # build a throwaway, PII-free demo repo in %TEMP%
+npm run compile
+pwsh -File scripts\demo-setup.ps1          # create a throwaway, PII-free demo repo in %TEMP%
 ```
 
-Then open the generated folder in VS Code, compare `feature/demo → main`, frame the four panes
-(Comparison / Changed Files / Commits / Conversations) with the `src/api/handlers.ts` `[bug]` thread
-visible, and save the capture to `docs/images/screenshot.png`.
+Open the generated folder in an isolated VS Code profile with only Lighthouse enabled. Compare
+`feature/demo → main`, expand Comparison, and frame the three panes
+(Comparison / Changed Files / Threads) with the `src/api/handlers.ts` `[bug]` thread visible.
+Commits stays embedded in Comparison; leave it collapsed for a compact capture.
+Save the capture to `docs/images/screenshot.png`. Keep real workspaces, recent-project lists,
+accounts, terminals, and notifications out of the image.
 
-See `../../DEMO.md` for the full, repeatable instructions — the **Screenshot dataset** section
+See [`DEMO.md`](../../DEMO.md) for the isolated-profile launch command in **Screenshot dataset**
 (`scripts\demo-setup.ps1`), plus Option A (F5 dev host), Option B (sideload the `.vsix`), and
 Option C (VM sideload via hyperloop).

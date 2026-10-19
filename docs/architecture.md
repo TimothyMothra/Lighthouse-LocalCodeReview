@@ -1,6 +1,6 @@
 # Architecture
 
-Searchlight: Local Code Review is a single VS Code extension (TypeScript, compiled to
+Lighthouse: Local Code Review is a single VS Code extension (TypeScript, compiled to
 `out/extension.js`). It presents a three-view "pull-request panel" over a **local** git branch
 comparison and persists review comments as JSON on disk. This document describes how the pieces fit
 together and why.
@@ -13,8 +13,8 @@ together and why.
    well-defined schema; a separate `copilot` CLI agent reads it, replies, and stamps identity. The
    extension holds no API keys and never issues a model call.
 3. **Never clobber the original.** The schema is a backward-compatible superset of
-   `Gururagavendra.local-pr-review`, but Searchlight writes to its **own** storage path
-   (`.vscode/searchlight-reviews/`) so both extensions can coexist.
+   `Gururagavendra.local-pr-review`, but Lighthouse writes to its **own** storage path
+   (`.vscode/lighthouse-reviews/`) so both extensions can coexist.
 4. **Fast activation.** Git waits and shared host stalls can consume seconds during startup.
    Activation must return before doing Git work; local spans alone cannot identify the OS cause.
 5. **Testable core.** The data model is `vscode`-free so schema parsing and migrations can be unit
@@ -57,14 +57,14 @@ extension.ts ............ activation, view wiring, command registration, Ask-Cop
 
 ## 3. The three views
 
-The activity-bar container `searchlight` hosts three views, all reading from one `ActiveComparison`
+The activity-bar container `lighthouse` hosts three views, all reading from one `ActiveComparison`
 supplied via a `() => active` getter:
 
 | Order | View | Default | Role |
 |-------|------|---------|------|
-| 1 | Comparison (`searchlight.comparison`) | Collapsed; embedded Commits collapsed too | Base/Compare selectors, History/Review commit tree and native Set as Base |
-| 2 | Changed Files (`searchlight.files`) | All folders initially expanded | Changed files and reviewed-file checkboxes; no all-changes toolbar button |
-| 3 | Threads (`searchlight.conversations`) | Resolved threads hidden | Inline-code navigation, Read thread, resolve/reopen controls |
+| 1 | Comparison (`lighthouse.comparison`) | Collapsed; embedded Commits collapsed too | Base/Compare selectors, History/Review commit tree and native Set as Base |
+| 2 | Changed Files (`lighthouse.files`) | All folders initially expanded | Changed files and reviewed-file checkboxes; no all-changes toolbar button |
+| 3 | Threads (`lighthouse.conversations`) | Resolved threads hidden | Inline-code navigation, Read thread, resolve/reopen controls |
 
 All three are WebviewViews. The Comparison view originally
 used a two-row TreeView whose rows fired `showQuickPick()`. The resulting top-center popup was
@@ -74,7 +74,7 @@ that renders two `<input>` + filterable-dropdown fields *in place* removed the p
 Manifest collapse/order defaults do not override layouts VS Code already remembers for a workspace.
 Changed Files applies initial expansion once per webview, preserving subsequent folder choices
 across refreshes; its Expand All command remains available. Conversations retains an explicit
-Show Resolved choice across reloads. `searchlight.commitsViewAllChanges` remains a Command Palette
+Show Resolved choice across reloads. `lighthouse.commitsViewAllChanges` remains a Command Palette
 action even though its Changed Files toolbar button was removed.
 
 ## 4. The active comparison (single source of truth)
@@ -191,9 +191,9 @@ cannot replace a newer selection. Collapse-all now belongs to Comparison's title
 
 `activate()` (extension.ts) deliberately does **no awaited git work**:
 
-1. Create the Searchlight OUTPUT channel, `initPerf`, and the `ReviewStatusBar`.
+1. Create the Lighthouse OUTPUT channel, `initPerf`, and the `ReviewStatusBar`.
 2. Construct `ActiveComparison(wsFolder, wsFolder)` with a **placeholder** repo root.
-3. Construct `SearchlightCommentController` with a `() => active` getter (so a first-ever thread can
+3. Construct `LighthouseCommentController` with a `() => active` getter (so a first-ever thread can
    target the active comparison before any `comments.json` exists).
 4. Register the three providers, all reading `() => active`.
 5. Register `ReviewDiffContentProvider` on the diff scheme, `registerTagCompletion()`, the file
@@ -223,7 +223,7 @@ still read live HEAD. Initial API hydration cannot invalidate a disk catalogue p
 early filesystem watches.
 
 `onStartupFinished` activation makes inline discussions available in ordinary and Source Control
-editors without opening Searchlight. Existing threads/replies do not require comparison Git work.
+editors without opening Lighthouse. Existing threads/replies do not require comparison Git work.
 Usage observation starts here too, independently of performance logging; it records fixed feature
 labels and editor categories, never user content. See [Local feature usage](usage-diagnostics.md).
 
@@ -267,7 +267,7 @@ It reloads latest content and guards against observed external writes. Compariso
 file-event generations prevent delayed hashes or checkbox messages from mutating another review;
 the filesystem guard does not provide cross-process atomicity.
 
-Review discovery walks only each workspace's `.vscode/searchlight-reviews` subtree, not the
+Review discovery walks only each workspace's `.vscode/lighthouse-reviews` subtree, not the
 workspace search index. Simultaneous discovery requests share the in-flight directory walk;
 completed results are not cached, and each caller still parses independent review objects.
 Missing stores are empty; other filesystem errors propagate. Linked directories are not traversed
@@ -325,7 +325,7 @@ with an empty review. First messages create missing review directories lazily.
 
 Markdown rendering is loaded only when messages need formatting. Raw HTML is disabled, remote
 images are omitted, and link clicks are routed through an HTTP/HTTPS-only host handler under a
-nonce-based CSP. The old read-only `searchlight-conversation` document provider remains registered
+nonce-based CSP. The old read-only `lighthouse-conversation` document provider remains registered
 for existing/restored transcript tabs. Legacy threads without stable IDs remain readable but cannot
 be mutated through the new page.
 
@@ -338,7 +338,7 @@ reads config: copilotPath (default "copilot"), copilotArgs (default ["-p"])
 builds a prompt: "Respond to local review thread <id> in <reviewDir>. Read comments.json,
                   reply in-thread per the schema (v2: author object, tags[], replyTo),
                   stamp your identity as ~Written by 🤖 Copilot, and set thread state appropriately."
-opens an integrated terminal "Searchlight · Copilot" with cwd = reviewDir
+opens an integrated terminal "Lighthouse · Copilot" with cwd = reviewDir
 terminal.sendText(<cliPath> <args> <prompt>)
 ```
 
@@ -365,7 +365,7 @@ reply. **No LM API, no keys, no in-extension model call.**
 | Decision | Rationale |
 |----------|-----------|
 | External agent, not embedded model | No keys/telemetry in the extension; the schema is the whole contract; the agent side already exists |
-| Own storage path `.vscode/searchlight-reviews/` | Coexist with the original `local-pr-review` without clobbering its `.vscode/local-reviews/` |
+| Own storage path `.vscode/lighthouse-reviews/` | Coexist with the original `local-pr-review` without clobbering its `.vscode/local-reviews/` |
 | `vscode`-free `reviewModel.ts` | Unit-test the schema + `normalizeSeq` migration without the extension host |
 | Fast-return activation + on-demand Git | Multi-second dependency waits must not block extension activation |
 | Durable `seqCounter` for thread `#NN` ids | A transiently-empty in-memory review must not reset/reuse a display id; monotonic counter fixes it |
@@ -381,4 +381,4 @@ reply. **No LM API, no keys, no in-extension model call.**
   upstream; if not fast-forwardable it warns and does nothing (never merges or rebases). No push.
 - **Single workspace folder assumed** for the review store location.
 - **The agent round-trip requires the personal instruction file** to also read
-  `.vscode/searchlight-reviews/` (a superset of the original `.vscode/local-reviews/` guidance).
+  `.vscode/lighthouse-reviews/` (a superset of the original `.vscode/local-reviews/` guidance).

@@ -5,8 +5,8 @@
  *   - hierarchical folder tree, folders-first then alphabetical, files nested under folders,
  *   - "Loading changes…" placeholder until the changed-files data resolves,
  *   - per-file checkbox backed by saved comparison fingerprints,
- *   - click a file row → `searchlight.openFileDiff` with the file's relPath,
- *   - expand-all via `setExpanded(true)` (host command `searchlight.filesExpandAll`).
+ *   - click a file row → `lighthouse.openFileDiff` with the file's relPath,
+ *   - expand-all via `setExpanded(true)` (host command `lighthouse.filesExpandAll`).
  *
  * Icon gap: TreeItems get native file icons + git-status decoration colors for free; a webview
  * cannot. To close that gap, `getChangedFiles()` returns per-file `{ relPath, status }` (the status
@@ -76,13 +76,13 @@ type IncomingMessage =
 	| { type: 'rendered'; view: string; ms: number; count: number };
 
 /** workspaceState key persisting the show/hide-uncommitted toggle across reloads (default false = shown). */
-const HIDE_UNCOMMITTED_KEY = 'searchlight.files.hideUncommitted';
+const HIDE_UNCOMMITTED_KEY = 'lighthouse.files.hideUncommitted';
 
 /**
  * Context key backing the `view/title` show/hide-uncommitted buttons. It must be seeded on activation
  * (not only on toggle) so a user who reloads while in the hidden state still gets the "Show" button.
  */
-const HIDE_UNCOMMITTED_CONTEXT = 'searchlight.filesUncommittedHidden';
+const HIDE_UNCOMMITTED_CONTEXT = 'lighthouse.filesUncommittedHidden';
 
 /** Read the persisted hide-uncommitted flag (default false = uncommitted shown). */
 export function isUncommittedHidden(workspaceState: vscode.Memento): boolean {
@@ -138,13 +138,13 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 					break;
 				case 'openFile':
 					if (msg.relPath) {
-						await vscode.commands.executeCommand('searchlight.openFileDiff', msg.relPath);
+						await vscode.commands.executeCommand('lighthouse.openFileDiff', msg.relPath);
 					}
 					break;
 				case 'openUncommitted':
 					if (msg.relPath) {
 						await vscode.commands.executeCommand(
-							'searchlight.openUncommittedFileDiff',
+							'lighthouse.openUncommittedFileDiff',
 							msg.relPath,
 							msg.group,
 						);
@@ -153,7 +153,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 				case 'openCumulative':
 					if (msg.relPath) {
 						await vscode.commands.executeCommand(
-							'searchlight.openCumulativeFileDiff',
+							'lighthouse.openCumulativeFileDiff',
 							msg.relPath,
 						);
 					}
@@ -194,7 +194,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 		await this.postState();
 	}
 
-	/** Expand-all (host command `searchlight.filesExpandAll`) / collapse. */
+	/** Expand-all (host command `lighthouse.filesExpandAll`) / collapse. */
 	setExpanded(value: boolean): void {
 		this.filesExpanded = value;
 		this.view?.webview.postMessage({ type: 'setExpanded', value });
@@ -215,8 +215,8 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 			void this.statusBar.update();
 		} catch (error) {
 			event('reviewed.actionFailed');
-			console.error('[searchlight] Reviewed-state action failed:', error);
-			void vscode.window.showWarningMessage(`Searchlight: ${error instanceof Error ? error.message : String(error)}`);
+			console.error('[lighthouse] Reviewed-state action failed:', error);
+			void vscode.window.showWarningMessage(`Lighthouse: ${error instanceof Error ? error.message : String(error)}`);
 			this.refreshAvailability();
 		}
 	}
@@ -237,7 +237,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 		if (!uri || !this.view) {
 			return;
 		}
-		if (!vscode.workspace.getConfiguration('searchlight').get<boolean>('files.autoReveal', true)) {
+		if (!vscode.workspace.getConfiguration('lighthouse').get<boolean>('files.autoReveal', true)) {
 			return;
 		}
 		const relPath = this.toRelPath(uri);
@@ -252,7 +252,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 	/**
 	 * Map an active editor's uri back to a repo-relative path, or undefined when it isn't a file in
 	 * this repo. A diff editor's active text editor is one SIDE of the diff, so both the historical
-	 * `searchlight-diff` side and the working-tree `file` side occur.
+	 * `lighthouse-diff` side and the working-tree `file` side occur.
 	 */
 	private toRelPath(uri: vscode.Uri): string | undefined {
 		if (uri.scheme === DIFF_SCHEME) {
@@ -300,7 +300,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 		// branch would be meaningless. Falls back to the split view when off, when an explicit compare
 		// branch is selected, or when there is no merge-base.
 		if (
-			vscode.workspace.getConfiguration('searchlight').get<boolean>('files.cumulativeDiff', true) &&
+			vscode.workspace.getConfiguration('lighthouse').get<boolean>('files.cumulativeDiff', true) &&
 			active.compareIsHead &&
 			active.baselineCommit
 		) {
@@ -321,7 +321,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 			// uncommitted work, leaving only those whose branch changes are fully committed.
 			const visibleCum = hideUncommitted ? rows.filter((f) => !f.uncommitted) : rows;
 			const treeCum = this.buildTree(visibleCum);
-			if (vscode.workspace.getConfiguration('searchlight').get<boolean>('files.compactFolders', true)) {
+			if (vscode.workspace.getConfiguration('lighthouse').get<boolean>('files.compactFolders', true)) {
 				compactTree(treeCum);
 			}
 			logBuild('files', tBuildCum, visibleCum.length, treeCum);
@@ -375,7 +375,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 		// Explorer-style folder compaction (`a/b/c` on one row) is opt-out via settings so the user can
 		// flip it without a rebuild. Runs AFTER buildTree/sortLevel so the client stays dumb — it just
 		// renders whatever tree it is handed.
-		if (vscode.workspace.getConfiguration('searchlight').get<boolean>('files.compactFolders', true)) {
+		if (vscode.workspace.getConfiguration('lighthouse').get<boolean>('files.compactFolders', true)) {
 			compactTree(tree);
 		}
 		// count = merged visible leaves (respects the hide filter) — the whole tree is built at once.

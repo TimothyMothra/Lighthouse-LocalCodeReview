@@ -1,5 +1,5 @@
 /**
- * Write layer for Searchlight `comments.json` files.
+ * Write layer for Lighthouse `comments.json` files.
  *
  * Reading is handled by reviewModel.ts (tolerant of v1 + v2). This module owns MUTATION and
  * SERIALIZATION: it always writes schema **v2** (version:2, object `author`, thread `tags[]`,
@@ -16,8 +16,8 @@ import * as vscode from 'vscode';
 import { Review, ReviewAuthor, ReviewComment, ReviewThread, parseReview, normalizeSeq } from './reviewModel';
 import { event, trace } from './diagnostics';
 
-/** Glob (relative to each workspace folder) for Searchlight review storage. */
-export const REVIEWS_GLOB = '.vscode/searchlight-reviews/**/comments.json';
+/** ASSUMPTION: existing stores are moved once by the user; discovery uses only the Lighthouse namespace. */
+export const REVIEWS_GLOB = '.vscode/lighthouse-reviews/**/comments.json';
 
 const discoveryInFlight = new Map<string, Promise<vscode.Uri[]>>();
 const mutationTails = new Map<string, Promise<void>>();
@@ -72,7 +72,7 @@ function isMissing(error: unknown): boolean {
 }
 
 function discoverReviews(folder: vscode.Uri): Promise<vscode.Uri[]> {
-	const root = vscode.Uri.joinPath(folder, '.vscode', 'searchlight-reviews');
+	const root = vscode.Uri.joinPath(folder, '.vscode', 'lighthouse-reviews');
 	const key = root.toString();
 	const existing = discoveryInFlight.get(key);
 	if (existing) {
@@ -267,7 +267,7 @@ function sanitizeBranch(branch: string): string {
 
 /**
  * Compute the storage directory and comments.json path for a comparison.
- * Layout: `<workspaceFolder>/.vscode/searchlight-reviews/<compare>_<base>/comments.json`
+ * Layout: `<workspaceFolder>/.vscode/lighthouse-reviews/<compare>_<base>/comments.json`
  * (branch names sanitized: `/` → `-`). `compare` maps to sourceBranch, `base` to targetBranch.
  */
 export function computeReviewPaths(
@@ -276,7 +276,7 @@ export function computeReviewPaths(
 	base: string,
 ): { reviewDir: string; sourceFile: string } {
 	const dirName = `${sanitizeBranch(compare)}_${sanitizeBranch(base)}`;
-	const reviewDir = path.join(workspaceFolderFsPath, '.vscode', 'searchlight-reviews', dirName);
+	const reviewDir = path.join(workspaceFolderFsPath, '.vscode', 'lighthouse-reviews', dirName);
 	const sourceFile = path.join(reviewDir, 'comments.json');
 	return { reviewDir, sourceFile };
 }

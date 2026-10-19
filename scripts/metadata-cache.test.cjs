@@ -25,8 +25,8 @@ function mockedCache(overrides) {
 }
 
 async function fixture(t) {
-	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'searchlight-metadata-'));
-	const folder = path.join(root, '.vscode', 'searchlight-reviews', 'feature_main');
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lighthouse-metadata-'));
+	const folder = path.join(root, '.vscode', 'lighthouse-reviews', 'feature_main');
 	const file = path.join(folder, 'metadata-cache.json'), caches = [], logs = [], calls = [];
 	t.after(async () => {
 		for (const cache of caches) { cache.dispose(); }

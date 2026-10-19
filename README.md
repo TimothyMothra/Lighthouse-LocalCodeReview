@@ -1,4 +1,4 @@
-# Searchlight: Local Code Review
+# Lighthouse: Local Code Review
 
 A **local-only VS Code extension** for reviewing your own git branch diffs the way you'd review a
 pull request — native inline comment threads, a three-view "PR panel", `/tag` classification, and a
@@ -6,15 +6,15 @@ one-click **Ask Copilot** round-trip — all offline, with every comment stored 
 
 > **Status:** local-only, single-developer tool. The extension **never calls a language model
 > directly** — all AI work happens through an external `copilot` CLI shell-out. Reviews live under
-> `.vscode/searchlight-reviews/` (no server, no database, no network), a superset of — and never a
+> `.vscode/lighthouse-reviews/` (no server, no database, no network), a superset of — and never a
 > clobber of — the original `Gururagavendra.local-pr-review` format.
 
 ## Screenshot
 
-![Searchlight showing a synthetic demo review: four-view panel and inline comment threads](docs/images/screenshot.png)
+![Lighthouse: Local Code Review showing Comparison, Changed Files, Threads, and a synthetic inline review](docs/images/screenshot.png)
 
-_Earlier four-pane layout, captured with the demo dataset (synthetic, no PII). Commits now live inside
-Comparison — see [`DEMO.md`](./DEMO.md)._
+_Current three-view layout with Commits embedded in Comparison, captured using only synthetic
+widget-service code and review comments — see [`DEMO.md`](./DEMO.md)._
 
 ## What it does
 
@@ -35,7 +35,7 @@ Comparison — see [`DEMO.md`](./DEMO.md)._
 - **Ask Copilot round-trip** — hand a review thread to the `copilot` CLI; when the agent writes its
   reply back into `comments.json`, a file watcher reloads and re-renders it in-thread. The extension
   only ever *shells out* — it never calls a model itself.
-- **Plain-JSON storage** — reviews are human-readable JSON under `.vscode/searchlight-reviews/`,
+- **Plain-JSON storage** — reviews are human-readable JSON under `.vscode/lighthouse-reviews/`,
   created lazily on first mutation so clean repos stay clean. Durable thread ids and v1/v2
   back-compat are preserved on every write.
 
@@ -48,7 +48,7 @@ Build and install into your local VS Code from source:
 npm install
 npm run compile
 
-# 2. Package the extension into searchlight-0.0.1.vsix (gitignored)
+# 2. Package the extension into lighthouse-0.0.1.vsix (gitignored)
 npx @vscode/vsce package
 
 # 3. Build + install into local VS Code in one step
@@ -66,7 +66,7 @@ Classify a thread by typing `/` in the comment box and picking from the autocomp
 
 `/idea` · `/question` · `/bug` · `/change` · `/todo`
 
-(The full configurable set also includes `/nit` and `/praise`; edit `searchlight.tags` to customize.)
+(The full configurable set also includes `/nit` and `/praise`; edit `lighthouse.tags` to customize.)
 
 ## Documentation
 

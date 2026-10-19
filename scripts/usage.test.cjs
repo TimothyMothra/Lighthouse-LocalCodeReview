@@ -60,15 +60,26 @@ test('uses supplied startMs as the shared monotonic origin', () => {
 	assert.equal(h.snapshot().atMs, 500);
 });
 
+test('usage attributes commands only to Lighthouse', () => {
+	const h = makeHarness();
+	// An unrelated extension's command must not enter Lighthouse's local usage log.
+	usage.recordUsage('command.started', { command: 'otherExtension.refreshAll' });
+	usage.recordUsage('command.started', { command: 'lighthouse.refreshAll' });
+	const snapshot = h.snapshot();
+	assert.equal(snapshot.counts.commands.started, 1);
+	assert.deepEqual(Object.keys(snapshot.counts.commands.byCommand), ['lighthouse.refreshAll']);
+	assert.ok(!h.lines.some((line) => line.includes('otherExtension')));
+});
+
 test('tracks command, pane, discussion, focus, editor, disable and re-enable activity', () => {
 	const h = makeHarness({ enabled: true, focused: true });
 
 	usage.usageEditor('text-editor');
 	usage.usagePane('comparison', true);
-	usage.recordUsage('command.started', { command: 'searchlight.refreshAll', pane: 'comparison', action: 'selectBase', count: 99, tagged: true, outcome: 'ok' });
-	usage.recordUsage('command.completed', { command: 'searchlight.refreshAll' });
-	usage.recordUsage('command.started', { command: 'searchlight.copySha' });
-	usage.recordUsage('command.failed', { command: 'searchlight.copySha' });
+	usage.recordUsage('command.started', { command: 'lighthouse.refreshAll', pane: 'comparison', action: 'selectBase', count: 99, tagged: true, outcome: 'ok' });
+	usage.recordUsage('command.completed', { command: 'lighthouse.refreshAll' });
+	usage.recordUsage('command.started', { command: 'lighthouse.copySha' });
+	usage.recordUsage('command.failed', { command: 'lighthouse.copySha' });
 	usage.recordUsage('pane.action', { pane: 'comparison', action: 'selectBase' });
 	usage.recordUsage('discussion.created', { count: 2, tagged: true });
 	usage.recordUsage('discussion.replied', { tagged: false });
@@ -76,7 +87,7 @@ test('tracks command, pane, discussion, focus, editor, disable and re-enable act
 	usage.recordUsage('discussion.reopened');
 	usage.recordUsage('discussion.exposed', { count: 3 });
 	usage.recordUsage('random.private.event', { body: 'TOP-SECRET', path: 'C:\\private\\file.ts' });
-	usage.recordUsage('command.started', { command: 'searchlight.refreshAll', body: 'TOP-SECRET', branch: 'main' });
+	usage.recordUsage('command.started', { command: 'lighthouse.refreshAll', body: 'TOP-SECRET', branch: 'main' });
 
 	h.advance(40);
 	const snapA = h.snapshot();
@@ -118,7 +129,7 @@ test('tracks command, pane, discussion, focus, editor, disable and re-enable act
 	assert.equal(h.snapshot().counts.commands.started, beforeSummary);
 
 	const outputs = h.lines.map(parse);
-	assert.ok(outputs.some((item) => item.event === 'command.completed' && item.command === 'searchlight.refreshAll'));
+	assert.ok(outputs.some((item) => item.event === 'command.completed' && item.command === 'lighthouse.refreshAll'));
 	assert.ok(outputs.some((item) => item.event === 'pane.action' && item.pane === 'comparison' && item.action === 'selectBase'));
 	assert.ok(outputs.some((item) => item.event === 'discussion.exposed' && item.count === 3));
 	assert.ok(outputs.some((item) => item.event === 'usage.summary'));
@@ -157,7 +168,7 @@ test('drops unsupported events and caps recent events at 2000', () => {
 	const h = makeHarness({ enabled: true, focused: true });
 
 	usage.recordUsage('private.event', { path: 'C:\\secret', body: 'TOP-SECRET' });
-	usage.recordUsage('command.started', { command: 'searchlight.refreshAll', path: 'C:\\secret', body: 'TOP-SECRET' });
+	usage.recordUsage('command.started', { command: 'lighthouse.refreshAll', path: 'C:\\secret', body: 'TOP-SECRET' });
 	usage.recordUsage('pane.action', { pane: 'comparison', action: 'openFile', path: 'C:\\secret' });
 	usage.recordUsage('discussion.created', { count: 1, body: 'TOP-SECRET' });
 
@@ -209,20 +220,20 @@ test('hidden observations and pane hides are not visits, and unchanged notificat
 test('contextual feature counts survive event eviction and previous summaries are immutable', () => {
 	const h = makeHarness();
 	usage.usageEditor('git-diff');
-	usage.recordUsage('command.started', { command: 'searchlight.createOrReply' });
+	usage.recordUsage('command.started', { command: 'lighthouse.createOrReply' });
 	usage.recordUsage('discussion.replied');
 	usage.emitUsageSummary();
 	const before = h.snapshot();
-	usage.recordUsage('command.started', { command: 'searchlight.createOrReply' });
-	assert.equal(before.counts.commands.byCommand['searchlight.createOrReply'].started, 1);
-	assert.equal(before.recent.find((item) => item.event === 'usage.summary').counts.commands.byCommand['searchlight.createOrReply'].started, 1);
-	usage.usageEditor('searchlight-diff');
+	usage.recordUsage('command.started', { command: 'lighthouse.createOrReply' });
+	assert.equal(before.counts.commands.byCommand['lighthouse.createOrReply'].started, 1);
+	assert.equal(before.recent.find((item) => item.event === 'usage.summary').counts.commands.byCommand['lighthouse.createOrReply'].started, 1);
+	usage.usageEditor('lighthouse-diff');
 	usage.recordUsage('discussion.created');
 	for (let i = 0; i < 2000; i++) { usage.recordUsage('editor.changed'); }
 	const snapshot = h.snapshot();
 	assert.equal(snapshot.counts.byEditorContext['git-diff'].discussions.replied, 1);
-	assert.equal(snapshot.counts.byEditorContext['git-diff'].commands['searchlight.createOrReply'].started, 2);
-	assert.equal(snapshot.counts.byEditorContext['searchlight-diff'].discussions.created, 1);
+	assert.equal(snapshot.counts.byEditorContext['git-diff'].commands['lighthouse.createOrReply'].started, 2);
+	assert.equal(snapshot.counts.byEditorContext['lighthouse-diff'].discussions.created, 1);
 	for (const count of [0, -1, NaN, Infinity]) { usage.recordUsage('discussion.exposed', { count }); }
 	assert.equal(h.snapshot().counts.discussions.exposed, 0);
 });

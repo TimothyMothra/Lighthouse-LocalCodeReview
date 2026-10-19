@@ -1,8 +1,8 @@
 /**
- * Lightweight load-time instrumentation for the Searchlight OUTPUT channel.
+ * Lightweight load-time instrumentation for the Lighthouse OUTPUT channel.
  *
  * Routes `[perf]` lines through the same channel `extension.ts` uses for user-visible feedback, so
- * timings appear inline with git/action logs. All output is gated behind the `searchlight.perfLogging`
+ * timings appear inline with git/action logs. All output is gated behind the `lighthouse.perfLogging`
  * setting (default true) so the user can silence it once they've seen the numbers.
  *
  * Host timers use the monotonic clock exported by diagnostics.ts.
@@ -11,18 +11,18 @@
 import * as vscode from 'vscode';
 import { event, now, startDiagnostics } from './diagnostics';
 
-/** The shared Searchlight output channel, wired once from `activate()`. */
+/** The shared Lighthouse output channel, wired once from `activate()`. */
 let channel: vscode.OutputChannel | undefined;
 
-/** Wire the shared Searchlight output channel (called once from `activate`). */
+/** Wire the shared Lighthouse output channel (called once from `activate`). */
 export function initPerf(outputChannel: vscode.OutputChannel, start = now(), metadata = {}): void {
 	channel = outputChannel;
 	startDiagnostics(start, perfEnabled(), (line) => channel?.appendLine(line), metadata);
 }
 
-/** True when perf logging is enabled (searchlight.perfLogging, default true). */
+/** True when perf logging is enabled (lighthouse.perfLogging, default true). */
 function perfEnabled(): boolean {
-	return vscode.workspace.getConfiguration('searchlight').get<boolean>('perfLogging', true);
+	return vscode.workspace.getConfiguration('lighthouse').get<boolean>('perfLogging', true);
 }
 
 /**

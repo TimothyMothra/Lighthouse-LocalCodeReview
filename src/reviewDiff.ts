@@ -1,7 +1,7 @@
 /**
  * Read-only diff support for the active comparison.
  *
- * Registers a `TextDocumentContentProvider` for the `searchlight-diff` scheme that serves a file's
+ * Registers a `TextDocumentContentProvider` for the `lighthouse-diff` scheme that serves a file's
  * contents at an arbitrary git ref (via `git show <ref>:<path>`), and exposes `openFileDiff` which
  * opens VS Code's native diff editor comparing base ↔ compare for a single changed file.
  */
@@ -16,7 +16,7 @@ import { changedFilesForCommit, changedFilesUncommitted } from './git';
 const execFileAsync = promisify(execFile);
 
 /** URI scheme used to serve historical file content for the diff editor. */
-export const DIFF_SCHEME = 'searchlight-diff';
+export const DIFF_SCHEME = 'lighthouse-diff';
 
 /**
  * Serves file content at a given git ref for the diff editor.
@@ -48,7 +48,7 @@ export class ReviewDiffContentProvider implements vscode.TextDocumentContentProv
 	}
 }
 
-/** Build a `searchlight-diff` URI that serves `relPath` at `ref` from the repo at `cwd`. */
+/** Build a `lighthouse-diff` URI that serves `relPath` at `ref` from the repo at `cwd`. */
 function diffUri(relPath: string, ref: string, cwd: string): vscode.Uri {
 	return vscode.Uri.from({
 		scheme: DIFF_SCHEME,
@@ -73,7 +73,7 @@ export async function openFileDiff(active: ActiveComparison, relPath: string): P
 	const base = active.baselineCommit;
 	const compare = active.compareCommit;
 	if (!cwd || !base || !compare) {
-		void vscode.window.showWarningMessage(active.baselineError ?? 'Searchlight: select a resolved comparison first.');
+		void vscode.window.showWarningMessage(active.baselineError ?? 'Lighthouse: select a resolved comparison first.');
 		return;
 	}
 
@@ -117,7 +117,7 @@ export async function openUncommittedFileDiff(
 		return;
 	}
 	// `git show :0:<path>` serves the stage-0 (normal) index content; `git show HEAD:<path>` the
-	// committed content. Both go through the generic `searchlight-diff` content provider unchanged.
+	// committed content. Both go through the generic `lighthouse-diff` content provider unchanged.
 	// For an untracked file the path exists in neither HEAD nor the index, so `git show HEAD:<path>`
 	// errors and the content provider returns '' — an honest empty left side (whole file = added).
 	const isUntracked = group === 'untracked';
@@ -156,7 +156,7 @@ export async function openCumulativeFileDiff(active: ActiveComparison, relPath: 
 	const cwd = active.repoRootFsPath;
 	const mergeBaseSha = active.baselineCommit;
 	if (!cwd || !relPath || !mergeBaseSha) {
-		void vscode.window.showWarningMessage(active.baselineError ?? 'Searchlight: select a resolved comparison first.');
+		void vscode.window.showWarningMessage(active.baselineError ?? 'Lighthouse: select a resolved comparison first.');
 		return;
 	}
 	const leftUri = diffUri(relPath, mergeBaseSha, cwd);
@@ -175,12 +175,12 @@ export async function openAllChangesDiff(active: ActiveComparison): Promise<void
 	const base = active.baselineCommit;
 	const compare = active.compareCommit;
 	if (!cwd || !base || !compare) {
-		void vscode.window.showWarningMessage(active.baselineError ?? 'Searchlight: select a resolved comparison first.');
+		void vscode.window.showWarningMessage(active.baselineError ?? 'Lighthouse: select a resolved comparison first.');
 		return;
 	}
 	const key = active.comparisonKey;
 	const rightIsHead = compareIsHead(active);
-	const cumulative = rightIsHead && vscode.workspace.getConfiguration('searchlight').get<boolean>('files.cumulativeDiff', true);
+	const cumulative = rightIsHead && vscode.workspace.getConfiguration('lighthouse').get<boolean>('files.cumulativeDiff', true);
 	const files = cumulative ? await active.getChangedFilesCumulative() : await active.getChangedFiles();
 	if (cumulative) {
 		const { untracked } = await changedFilesUncommitted(cwd);
@@ -188,11 +188,11 @@ export async function openAllChangesDiff(active: ActiveComparison): Promise<void
 		files.push(...untracked.filter((file) => !paths.has(file.relPath)));
 	}
 	if (key !== active.comparisonKey) {
-		void vscode.window.showWarningMessage('Searchlight: the comparison changed while loading diffs. Open the changes again.');
+		void vscode.window.showWarningMessage('Lighthouse: the comparison changed while loading diffs. Open the changes again.');
 		return;
 	}
 	if (files.length === 0) {
-		void vscode.window.showInformationMessage('Searchlight: no changed files between base and compare.');
+		void vscode.window.showInformationMessage('Lighthouse: no changed files between base and compare.');
 		return;
 	}
 	const resources = files.map(({ relPath: rel }) => {
@@ -217,7 +217,7 @@ export async function openCommitDiff(active: ActiveComparison, sha: string): Pro
 	}
 	const files = await changedFilesForCommit(cwd, sha);
 	if (files.length === 0) {
-		void vscode.window.showInformationMessage(`Searchlight: commit ${short(sha)} changed no files.`);
+		void vscode.window.showInformationMessage(`Lighthouse: commit ${short(sha)} changed no files.`);
 		return;
 	}
 	const resources = files.map((rel) => {

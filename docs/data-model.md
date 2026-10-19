@@ -1,6 +1,6 @@
 # Data Model
 
-Searchlight review content is persisted as plain JSON under a workspace's `.vscode/searchlight-reviews/`
+Lighthouse review content is persisted as plain JSON under a workspace's `.vscode/lighthouse-reviews/`
 directory. There is no review database and no network state. The schema source of truth is
 `src/reviewModel.ts` (types, parse, migration — deliberately `vscode`-free) and `src/reviewStore.ts`
 (serialize, load, mutate).
@@ -8,20 +8,20 @@ directory. There is no review database and no network state. The schema source o
 ## 1. On-disk layout
 
 ```
-<workspaceFolder>/.vscode/searchlight-reviews/
+<workspaceFolder>/.vscode/lighthouse-reviews/
 ├── registry.json                       # list of known reviews + activeReviewId
 └── <compare>_<base>/                    # one folder per comparison; branch '/' -> '-'
     └── comments.json                    # the review: threads, comments, reviewedFiles
 ```
 
-- **Glob (activation + scan):** `.vscode/searchlight-reviews/**/comments.json`
+- **Glob (activation + scan):** `.vscode/lighthouse-reviews/**/comments.json`
   (`REVIEWS_GLOB` in reviewStore.ts). Deliberately **not** the original extension's
   `.vscode/local-reviews/` — the two coexist.
 - **Folder name:** `<compare>_<base>` where `compare` = SOURCE branch and `base` = TARGET branch,
   each run through `sanitizeBranch` (every `/` → `-`). Example: compare `feature/mul`, base `main`
   → `feature-mul_main/`.
 - **Activation events:** `onStartupFinished` and
-  `workspaceContains:.vscode/searchlight-reviews/**/comments.json`, plus implicit view/command
+  `workspaceContains:.vscode/lighthouse-reviews/**/comments.json`, plus implicit view/command
   activation. Inline comments and local usage observation start without opening the sidebar;
   heavy comparison initialization remains on demand.
 
@@ -43,6 +43,21 @@ always starts from the chosen row.
 Unpin clears only the current source's remembered target override and the applicable old/new
 baseline-pin entries, then recomputes the automatic target. Review files themselves are untouched;
 returning to a branch target selects its existing branch-named review again.
+
+### Moving reviews from a previous extension identity
+
+Lighthouse uses the VS Code extension identity `TimothyMothra.lighthouse`. It only
+registers `lighthouse.*` commands/settings and discovers `.vscode/lighthouse-reviews/`.
+Before switching, save important drafts and stop the old extension's writers. Back up
+the review store, then move the previous installation's entire review-store directory to
+`.vscode/lighthouse-reviews/`, preserving all JSON bytes, registries and comparison folders.
+If the destination already exists, stop and reconcile it explicitly; do not overwrite it.
+
+Update explicit settings and command keybindings to the `lighthouse.*` namespace.
+VS Code's private layout/state, pinned targets and open diff/thread tabs do not migrate
+automatically: record wanted preferences and reapply/reopen them in Lighthouse.
+Do not edit VS Code databases or rewrite user-authored review prose or historical diagnostic logs.
+The v1/v2 review schema and the original extension's `.vscode/local-reviews/` remain unchanged.
 
 ## 2. Sources → readers
 
@@ -118,7 +133,7 @@ message creates the review directory/file as needed.
 
 ## 5. v1 back-compat (reading)
 
-`parseReview` is tolerant so files written by the original extension (or an older Searchlight) still
+`parseReview` is tolerant so files written by the original extension (or an older Lighthouse) still
 load:
 
 | v1 shape | Normalized to |
@@ -146,7 +161,7 @@ from a momentarily-empty thread set.
 ## 7. Tags
 
 - **Core set (default):** `idea question bug change todo nit praise`
-  (configurable via `searchlight.tags`).
+  (configurable via `lighthouse.tags`).
 - Entered as `/tag` tokens in the comment input (see `tagCompletion.ts`); merged into the thread's
   `tags[]` on submit.
 

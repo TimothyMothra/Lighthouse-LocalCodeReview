@@ -1,5 +1,5 @@
 /**
- * Small git helpers used by Searchlight.
+ * Small git helpers used by Lighthouse.
  *
  * These intentionally shell out to `git` (rather than depending on the built-in vscode.git
  * extension API) so they work headlessly and in the Extension Development Host without waiting

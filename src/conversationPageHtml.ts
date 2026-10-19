@@ -1028,7 +1028,7 @@ function renderTimeline(data) {
 
 function syncDocumentTitle(data) {
   const prefix = data.mode === 'new' ? 'New thread' : data.title;
-  document.title = 'Searchlight — ' + prefix;
+  document.title = 'Lighthouse — ' + prefix;
 }
 
 function renderState(data) {
@@ -1260,7 +1260,7 @@ setStatus('Loading thread…');
 <body>
   <div class="shell">
     <header class="hero">
-      <div class="eyebrow"><span class="eyebrow-badge">S</span><span>Searchlight / Thread</span></div>
+      <div class="eyebrow"><span class="eyebrow-badge">L</span><span>Lighthouse / Thread</span></div>
       <div class="title-row">
         <div class="title-block">
           <h1 id="page-title" class="title">Thread</h1>

@@ -54,7 +54,7 @@ export class FileSnapshotReader {
 	private readonly stamps = new Map<string, string>();
 	private readonly fileModes = new Map<string, Promise<boolean>>();
 
-	constructor(private readonly log: (message: string) => void = (message) => console.warn(`[searchlight] ${message}`)) {}
+	constructor(private readonly log: (message: string) => void = (message) => console.warn(`[lighthouse] ${message}`)) {}
 
 	reset(): void { this.saved.clear(); this.stamps.clear(); }
 	async flushMetadata(): Promise<void> {
@@ -489,7 +489,7 @@ export class ReviewedFiles implements vscode.Disposable {
 		event('reviewed.failed', { ...fields, ...errorFields(error) });
 		const message = error instanceof Error ? error.message : String(error);
 		this.log(`Reviewed-state validation failed: ${message}`);
-		void vscode.window.showWarningMessage(`Searchlight: ${message} Use Refresh to retry reviewed-state validation.`);
+		void vscode.window.showWarningMessage(`Lighthouse: ${message} Use Refresh to retry reviewed-state validation.`);
 	}
 
 	private async drain(): Promise<void> {
@@ -521,7 +521,7 @@ export class ReviewedFiles implements vscode.Disposable {
 						counts.legacyCleared = result.value;
 						event('reviewed.legacyCleared', { ...fields, count: result.value });
 						if (result.value) {
-							void vscode.window.showInformationMessage('Searchlight: previous reviewed checkmarks were cleared because they had no content fingerprints. Review those files again to begin tracking changes.');
+							void vscode.window.showInformationMessage('Lighthouse: previous reviewed checkmarks were cleared because they had no content fingerprints. Review those files again to begin tracking changes.');
 						}
 					}
 					const files = work.map(([file]) => file).filter((file) => this.getActive()?.review?.reviewedFiles?.includes(file));

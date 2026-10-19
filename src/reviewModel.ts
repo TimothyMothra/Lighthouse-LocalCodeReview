@@ -1,5 +1,5 @@
 /**
- * Review model + tolerant parser for Searchlight `comments.json` files.
+ * Review model + tolerant parser for Lighthouse `comments.json` files.
  *
  * Supports BOTH schema versions:
  *   v1 — `author` is a bare string; no thread `tags[]`.

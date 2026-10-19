@@ -1,37 +1,36 @@
-# Searchlight: Local Code Review — Demo Guide
+# Lighthouse: Local Code Review — Demo Guide
 
-This document is the repeatable demo path for the **Searchlight: Local Code Review** VS Code
+This document is the repeatable demo path for the **Lighthouse: Local Code Review** VS Code
 extension (v1 MVP). It covers two ways to run the demo:
 
 1. **Extension Development Host (F5)** — no packaging needed, fastest inner-loop.
 2. **Sideload the packaged `.vsix`** — how you'd demo on a clean machine / VM.
 
-> **VM note:** the `hyperloop` CLI is **not installed** on this build box, so the automated
-> VM sideload could not be exercised here. The `.vsix` was instead **smoke-tested against the
-> local `code` CLI** (install → list → uninstall, all exit 0 — see *Smoke-test evidence* below),
-> and the manual VM steps are documented in *Option C* so the demo is fully reproducible.
+> **Capture privacy:** use an isolated VS Code profile with only Lighthouse enabled and the
+> synthetic dataset below. Do not capture real workspaces, recent-project lists, signed-in
+> accounts, terminals, or unrelated notifications.
 
 ---
 
 ## What the demo shows
 
 The extension renders **local self-review comment threads** — JSON stored on disk under
-`.vscode/searchlight-reviews/<src>_<tgt>/comments.json` — as **native inline VS Code comment
+`.vscode/lighthouse-reviews/<src>_<tgt>/comments.json` — as **native inline VS Code comment
 threads** in the editor gutter, plus a **PR-review sidebar panel** (three stacked views:
-**Comparison** with commits, **Changed Files**, **Conversations**). It supports reply, resolve/
+**Comparison** with commits, **Changed Files**, **Threads**). It supports reply, resolve/
 unresolve, `/tag` autocomplete, copy commands, and an **Ask Copilot to review** trigger that
 shells out to the `copilot` CLI (the extension never calls a model itself).
 
 ### The three-view panel
 
-The `searchlight` activity-bar container hosts three webviews driven by a single
+The `lighthouse` activity-bar container hosts three webviews driven by a single
 in-memory **active comparison** (`base` = target branch or commit, `compare` = source branch under review):
 
 | View | Shows |
 |------|-------|
 | **Comparison**   | Inline Base/Compare selectors and a collapsed Commits section. Expand it to load History/Review rows; right-click a commit to Set as Base or expand a row to open file diffs. |
 | **Changed Files** | Hierarchical folder tree of `git diff base...compare`, with per-file reviewed checkboxes; click opens a native diff |
-| **Conversations** | Comment threads for the active review — click jumps to `file:line` |
+| **Threads** | Comment threads for the active review — click jumps to `file:line`; Read opens the discussion page |
 
 Defaults on activation: `compare` = current HEAD; `base` = a conservative nearest-ancestor branch
 suggestion, else the repository default. The on-disk `comments.json` is only created on the first mutation (a reviewed-file toggle
@@ -39,7 +38,7 @@ or a comment), so empty repos stay clean.
 
 ### The bundled fixture
 
-`.vscode/searchlight-reviews/main_feature/comments.json` (schema **v2**) contains **2 threads**:
+`.vscode/lighthouse-reviews/main_feature/comments.json` (schema **v2**) contains **2 threads**:
 
 | Thread | Anchor (`filePath:startLine`) | State | Tags | Contents |
 |--------|-------------------------------|-------|------|----------|
@@ -56,28 +55,32 @@ To capture the README screenshot (`docs/images/screenshot.png`) from a clean, **
 generate a self-contained throwaway demo repo instead of using this repo's own fixture:
 
 ```powershell
-# 1. Install the extension into local VS Code (compile + package + install)
-pwsh -File scripts\deploy-local.ps1
+# 1. Compile the extension; no install into your usual VS Code profile is needed
+npm run compile
 
-# 2. Generate the throwaway demo repo (defaults to %TEMP%\searchlight-demo)
-pwsh -File scripts\demo-setup.ps1 -Force
+# 2. Generate the throwaway demo repo (defaults to %TEMP%\lighthouse-demo)
+pwsh -File scripts\demo-setup.ps1
 
-# 3. Open the generated demo folder in VS Code
-code "$env:TEMP\searchlight-demo"
+# 3. Launch a separate profile with the development extension and synthetic workspace
+code --new-window --user-data-dir "$env:TEMP\lighthouse-screenshot-profile" `
+    --extensions-dir "$env:TEMP\lighthouse-screenshot-extensions" `
+    --extensionDevelopmentPath "$PWD" "$env:TEMP\lighthouse-demo"
 ```
 
-The generated repo has a `main` base branch and a `feature/demo` compare branch with **2 commits**
+The generated repo has a `main` base branch and a `feature/demo` compare branch with **2 feature commits**
 across **nested folders** (`src/api/`, `src/utils/`, `src/components/`, `tests/api/`) and a seeded
-**v2** review under `.vscode/searchlight-reviews/feature-demo_main/` — so all three panes populate:
+**v2** review under `.vscode/lighthouse-reviews/feature-demo_main/`. A third commit saves that
+review fixture, so all three panes populate:
 
 | Pane | What shows in the demo |
 |------|------------------------|
-| **Comparison**    | `Base: main` / `Compare: feature/demo`, with the 2 feature commits in Review mode (plus ancestors in History mode) |
+| **Comparison**    | `Base: main` / `Compare: feature/demo`; embedded Commits can show the 2 feature commits and the review-fixture commit in Review mode (plus ancestors in History mode) |
 | **Changed Files** | Folder tree: `src/api/{handlers,routes}.ts`, `src/utils/format.ts`, `src/components/Button.tsx`, `tests/api/handlers.test.ts` |
-| **Conversations** | 3 threads — the **`src/api/handlers.ts` `[bug]` thread** has a human comment + a threaded 🤖 Copilot agent reply |
+| **Threads** | 3 seeded threads (the resolved one is hidden by default) — the **`src/api/handlers.ts` `[bug]` thread** has a human comment + a threaded 🤖 Copilot agent reply |
 
-**To frame the screenshot:** in the demo window, open the Searchlight panel and compare
-`feature/demo → main`. Expand **Commits** inside Comparison to load its rows. Open **`src/api/handlers.ts`** so the inline **`[bug]` thread** (human
+**To frame the screenshot:** in the demo window, open the Lighthouse panel and compare
+`feature/demo → main`. Expand **Comparison** and leave its embedded **Commits** section collapsed
+for a compact capture with both selectors visible. Open **`src/api/handlers.ts`** so the inline **`[bug]` thread** (human
 comment + Copilot reply) is visible, with the three-view sidebar panel showing alongside. Then save
 the capture to **`docs/images/screenshot.png`** in *this* repo (the README references that path).
 
@@ -90,12 +93,12 @@ external (under `%TEMP%`), so running the script never dirties this worktree.
 ## Option A — Extension Development Host (F5)  ⭐ recommended
 
 1. Open this repo folder in VS Code:
-   `C:\REPOS\searchlight-localcodereview\` (or this worktree).
+   `C:\REPOS\lighthouse-localcodereview\` (or this worktree).
 2. `npm install` then `npm run compile` (both should already be green).
 3. Press **F5** (Run → Start Debugging). This uses `.vscode/launch.json` to launch a second VS
    Code window (the **Extension Development Host**) with the extension loaded.
 4. In that new window, **File → Open Folder** and pick this same repo (so the
-   `.vscode/searchlight-reviews/` fixture is present).
+   `.vscode/lighthouse-reviews/` fixture is present).
 
 ### What to look for
 
@@ -109,8 +112,8 @@ external (under `%TEMP%`), so running the script never dirties this worktree.
   parent comment. The file watcher re-renders the thread.
 - **Resolve / Unresolve** from the thread context menu → `state` flips in `comments.json`.
 - **`/tag` autocomplete** — type `/` in a comment/reply box → completion list offers
-  `idea question bug change todo nit praise` (configurable via the `searchlight.tags` setting).
-- **Copy commands** (Command Palette or thread menu): *Searchlight: Copy Commit Id / Copy Branch
+  `idea question bug change todo nit praise` (configurable via the `lighthouse.tags` setting).
+- **Copy commands** (Command Palette or thread menu): *Lighthouse: Copy Commit Id / Copy Branch
   Name / Copy Dir Path* → value lands on the clipboard.
 - **Ask Copilot to review** (thread title or review command) → opens an integrated terminal in the
   review dir and runs the configurable `copilot -p "…"` command. The extension only shells out —
@@ -125,19 +128,19 @@ v1.5 adds Git/worktree one-clicks. They prefer the built-in **vscode.git** exten
 (`getAPI(1)`) and fall back to the `git` CLI when the API can't cover a case. Exercise them from the
 **Extension Development Host (Option A)** against a repo checkout:
 
-- **Branch / remote pickers** — Command Palette → *Searchlight: Pick Branches for Review* (or the
+- **Branch / remote pickers** — Command Palette → *Lighthouse: Pick Branches for Review* (or the
   review node's context menu). A QuickPick lists local + remote refs (from the vscode.git API);
   choose a **source** then a **target**. The choice is persisted into the review's `comments.json`
   header (`sourceBranch` / `targetBranch` / `sourceCommit` / `targetCommit`) via the v2 writer, and
-  the status bar updates. *Searchlight: Switch Active Review* switches which review is active.
-- **Worktree-aware Open Directory** — review node context menu → *Searchlight: Open Directory*.
+  the status bar updates. *Lighthouse: Switch Active Review* switches which review is active.
+- **Worktree-aware Open Directory** — review node context menu → *Lighthouse: Open Directory*.
   Detects (via `git worktree list --porcelain`) whether the review's branch is checked out in a
   local worktree; if so it offers **Open Folder (new window)** or **Reveal in OS**. If the branch is
   not checked out anywhere, it says so gracefully.
-- **Git pull / push** — view title bar buttons (⬇ / ⬆) or *Searchlight: Git Pull* / *Git Push*.
+- **Git pull / push** — view title bar buttons (⬇ / ⬆) or *Lighthouse: Git Pull* / *Git Push*.
   Runs the vscode.git API `.pull()` / `.push()` (CLI fallback) inside `window.withProgress`, with
   success/error notifications. Push guards against detached HEAD; both guard against no-repo.
-- **Open terminal here** — review node context menu → *Searchlight: Open Terminal Here*. Opens an
+- **Open terminal here** — review node context menu → *Lighthouse: Open Terminal Here*. Opens an
   integrated terminal with `cwd` set to the review dir (else repo root, else first workspace folder).
 - **Status-bar active-review switcher** — a status-bar item shows the active review as
   `$(git-pull-request) src → tgt`. Click it to run *Switch Active Review*. It updates on activation,
@@ -150,14 +153,14 @@ an external CLI via *Ask Copilot to review*.
 
 ## Option B — Sideload the packaged `.vsix`
 
-Build (already produced): `searchlight-0.0.1.vsix` (13 files, ~21 KB).
+Build (already produced): `lighthouse-0.0.1.vsix` (13 files, ~21 KB).
 
 ```powershell
 # from the repo root
 npx @vscode/vsce package --allow-missing-repository --no-dependencies   # (re)build the vsix
-code --install-extension searchlight-0.0.1.vsix                         # sideload it
-# open a folder that contains .vscode/searchlight-reviews/<...>/comments.json, then verify as in Option A
-code --uninstall-extension local.searchlight                            # clean up when done
+code --install-extension lighthouse-0.0.1.vsix                         # sideload it
+# open a folder that contains .vscode/lighthouse-reviews/<...>/comments.json, then verify as in Option A
+code --uninstall-extension timothymothra.lighthouse                            # clean up when done
 ```
 
 ### Local install (one command)
@@ -173,18 +176,18 @@ Then run **Developer: Reload Window** in VS Code to pick up the new build.
 
 ---
 
-## Option C — VM sideload via hyperloop (documented; not run here)
+## Option C — VM sideload via hyperloop
 
-`hyperloop` was unavailable on this box. On a machine where it is installed:
+For capture in a VM, use an explicitly selected Hyperloop target:
 
 ```powershell
 # 1. copy the vsix into the test VM
-hyperloop copy-file <vm> --path "C:\REPOS\searchlight-localcodereview\searchlight-0.0.1.vsix" `
-    --direction tovm --name searchlight-0.0.1.vsix
+hyperloop copy-file <vm> --path "C:\REPOS\lighthouse-localcodereview\lighthouse-0.0.1.vsix" `
+    --direction tovm --name lighthouse-0.0.1.vsix
 
 # 2. install it into the VM's VS Code and open a fixture workspace
-hyperloop shell <vm> --script "code --install-extension `$env:USERPROFILE\...\searchlight-0.0.1.vsix"
-hyperloop shell <vm> --script "code C:\path\to\workspace-with-searchlight-reviews"
+hyperloop shell <vm> --script "code --install-extension `$env:USERPROFILE\...\lighthouse-0.0.1.vsix"
+hyperloop shell <vm> --script "code C:\path\to\workspace-with-lighthouse-reviews"
 
 # 3. capture a screenshot as demo evidence
 hyperloop window <vm> --action list --filter Code    # find the VS Code hwnd
@@ -195,31 +198,11 @@ Save the resulting screenshot to `docs/images/screenshot.png` in this repo as th
 
 ---
 
-## Smoke-test evidence (this box)
-
-The packaged `.vsix` was validated end-to-end against the local `code` CLI:
-
-```text
-> code --install-extension searchlight-0.0.1.vsix
-Extension 'searchlight-0.0.1.vsix' was successfully installed.        # exit 0
-
-> code --list-extensions | Select-String searchlight
-local.searchlight                                                     # present
-
-> code --uninstall-extension local.searchlight
-Extension 'local.searchlight' was successfully uninstalled!           # exit 0
-```
-
-This confirms the manifest is valid and the extension installs, is discovered by VS Code, and
-uninstalls cleanly. Full interactive UI verification is done via **Option A (F5)**.
-
----
-
 ## Configuration reference
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `searchlight.tags` | `["idea","question","bug","change","todo","nit","praise"]` | Tags offered by `/tag` autocomplete |
-| `searchlight.copilotPath` | `copilot` | CLI invoked by *Ask Copilot to review* |
-| `searchlight.copilotArgs` | `[]` | Extra args prepended to the `copilot` invocation |
-| `searchlight.defaultRemote` | `""` | Default remote name for *Git Push* (empty = let git choose the upstream) |
+| `lighthouse.tags` | `["idea","question","bug","change","todo","nit","praise"]` | Tags offered by `/tag` autocomplete |
+| `lighthouse.copilotPath` | `copilot` | CLI invoked by *Ask Copilot to review* |
+| `lighthouse.copilotArgs` | `[]` | Extra args prepended to the `copilot` invocation |
+| `lighthouse.defaultRemote` | `""` | Default remote name for *Git Push* (empty = let git choose the upstream) |

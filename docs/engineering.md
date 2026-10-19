@@ -1,7 +1,7 @@
 # Engineering
 
-How to build, package, deploy, and verify Searchlight: Local Code Review. All commands assume the
-repo root `C:\REPOS\searchlight-localcodereview`.
+How to build, package, deploy, and verify Lighthouse: Local Code Review. All commands assume the
+repo root `C:\REPOS\lighthouse-localcodereview\main` after the checkout rename.
 
 ## 1. Prerequisites
 
@@ -35,23 +35,23 @@ all of `node_modules` from the VSIX.
 npm run compile
 npm test                        # compile + built-in Node comparison regression tests
 
-# 2. Package the VSIX (rebuilds the gitignored searchlight-0.0.1.vsix, ~26 files / ~65 KB)
+# 2. Package the VSIX (rebuilds the gitignored lighthouse-0.0.1.vsix, ~26 files / ~65 KB)
 npx @vscode/vsce package
 
-# 3. Sideload into the host VS Code (installs local.searchlight@0.0.1)
+# 3. Sideload into the host VS Code (installs timothymothra.lighthouse@0.0.1)
 scripts\deploy-local.ps1
 ```
 
 - `deploy-local.ps1` emits a benign `DEP0169` Node deprecation warning — ignore it.
-- **Never commit `searchlight-0.0.1.vsix`** — it is gitignored build output and is rebuilt on every
+- **Never commit `lighthouse-0.0.1.vsix`** — it is gitignored build output and is rebuilt on every
   package.
 - After deploying, **Reload Window** in the target VS Code to pick up the new build.
 
 To confirm the install:
 
 ```powershell
-code --list-extensions --show-versions | Select-String searchlight
-# -> local.searchlight@0.0.1
+code --list-extensions --show-versions | Select-String lighthouse
+# -> timothymothra.lighthouse@0.0.1
 ```
 
 ### Comparison regression tests
@@ -73,11 +73,11 @@ No test stages, commits, or changes branches in the developer's repository.
 ## 4. Manifest highlights (`package.json`)
 
 - `publisher`: `TimothyMothra`; `repository.url`:
-  `https://github.com/TimothyMothra/Searchlight-LocalCodeReview.git`.
+  `https://github.com/TimothyMothra/Lighthouse-LocalCodeReview.git`.
 - `activationEvents`: `onStartupFinished` plus
-  `workspaceContains:.vscode/searchlight-reviews/**/comments.json`.
+  `workspaceContains:.vscode/lighthouse-reviews/**/comments.json`.
 - `capabilities.untrustedWorkspaces.supported`: `true` (works in Restricted Mode).
-- **~40 commands** and three views under the `searchlight` container; commit rows are inside Comparison.
+- **~40 commands** and three views under the `lighthouse` container; commit rows are inside Comparison.
 - Comparison title-bar order: `collapseAllCommits@0` · `copyCompareBranch@1` · `copyComparePath@2` · `openTerminal@3` ·
   `refreshAll@4`.
 
@@ -85,14 +85,14 @@ No test stages, commits, or changes branches in the developer's repository.
 
 | Key | Default | Purpose |
 |-----|---------|---------|
-| `searchlight.tags` | `[idea, question, bug, change, todo, nit, praise]` | `/tag` autocomplete set |
-| `searchlight.copilotPath` | `"copilot"` | CLI invoked by Ask-Copilot |
-| `searchlight.copilotArgs` | `["-p"]` | args prepended before the prompt |
-| `searchlight.defaultRemote` | — | preferred remote for branch listing |
-| `searchlight.autoCreateOnEmpty` | — | auto-create a review when none exists |
-| `searchlight.perfLogging` | — | verbose `[perf]` timings to the OUTPUT channel |
-| `searchlight.usageLogging` | `true` | local `[usage]` actions/exposure summaries; no remote telemetry |
-| `searchlight.deferThreadsOnLoad` | — | defer CommentController render for faster first paint |
+| `lighthouse.tags` | `[idea, question, bug, change, todo, nit, praise]` | `/tag` autocomplete set |
+| `lighthouse.copilotPath` | `"copilot"` | CLI invoked by Ask-Copilot |
+| `lighthouse.copilotArgs` | `["-p"]` | args prepended before the prompt |
+| `lighthouse.defaultRemote` | — | preferred remote for branch listing |
+| `lighthouse.autoCreateOnEmpty` | — | auto-create a review when none exists |
+| `lighthouse.perfLogging` | — | verbose `[perf]` timings to the OUTPUT channel |
+| `lighthouse.usageLogging` | `true` | local `[usage]` actions/exposure summaries; no remote telemetry |
+| `lighthouse.deferThreadsOnLoad` | — | defer CommentController render for faster first paint |
 
 ## 5. Performance notes
 
@@ -108,8 +108,8 @@ No test stages, commits, or changes branches in the developer's repository.
   hot path.
 - **Memoized comparison.** `changedFiles` / `logRange` results are cached keyed by the effective
   baseline/compare commit pair, so changing an upstream or pin invalidates the right results.
-- Turn on `searchlight.perfLogging` and watch the **Searchlight** OUTPUT channel to see `[perf]`
-  structured timings. **Searchlight: Export Startup Diagnostics** saves the bounded trace,
+- Turn on `lighthouse.perfLogging` and watch the **Lighthouse** OUTPUT channel to see `[perf]`
+  structured timings. **Lighthouse: Export Startup Diagnostics** saves the bounded trace,
   milestones, aggregates and outstanding operations to JSON. See
   [Startup diagnostics](startup-diagnostics.md) for the capture protocol and interpretation.
 
@@ -121,7 +121,7 @@ comment or a stale-branch update can be exercised end-to-end without touching th
 - **Harness:** `$hl = "$env:LOCALAPPDATA\Hyperloop\bin\hyperloop.exe"`. `copy-file … tovm` the
   `.vsix`, install into an **isolated** `--user-data-dir` / `--extensions-dir`, launch (Escape past
   Welcome/Sign-in), then drive via keyboard verbs.
-- **git in the VM** is on `PATH` via `C:\slh\tools\git\cmd`.
+- **git in the VM** is on `PATH` via `C:\lighthouse\tools\git\cmd` for newly provisioned harnesses.
 - **Keyboard verbs:** `hotkey --combo Ctrl+Shift+P` (key combos) and
   `type --hwnd <h> --text/--keys` (text / SendKeys). Note: `press-keys` / `type-text` are **not**
   valid verbs.
@@ -133,7 +133,7 @@ comment or a stale-branch update can be exercised end-to-end without touching th
 - **Linear history on `main`.** No merges, no feature-branch PRs for routine work.
 - Every commit carries the trailer:
   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
-- **Never** stage or commit `searchlight-0.0.1.vsix` (gitignored).
+- **Never** stage or commit `lighthouse-0.0.1.vsix` (gitignored).
 - No push / PR without explicit instruction.
 
 ## 8. Dependencies & pins
@@ -201,5 +201,5 @@ are required.
 - Windows-first tooling: `deploy-local.ps1` and the VM harness are PowerShell; the extension itself
   is cross-platform.
 - The Ask-Copilot round-trip depends on the `copilot` CLI being installed and on the personal
-  instruction file that teaches the agent to read `.vscode/searchlight-reviews/`.
+  instruction file that teaches the agent to read `.vscode/lighthouse-reviews/`.
 - Single workspace folder is assumed for the review store.

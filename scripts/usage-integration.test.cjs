@@ -17,14 +17,14 @@ function loadCompiled(name, mocks) {
 	return module.exports;
 }
 
-test('editor usage distinguishes Git-backed and Searchlight diffs without pretending ordinary files came from SCM', () => {
+test('editor usage distinguishes Git-backed and Lighthouse diffs without pretending ordinary files came from SCM', () => {
 	const uri = (scheme) => ({ scheme, path: 'private-path', query: 'private-ref', fsPath: 'private-file' });
 	assert.equal(classifyEditorInput({ original: uri('git'), modified: uri('file') }), 'git-diff');
-	assert.equal(classifyEditorInput({ original: uri('searchlight-diff'), modified: uri('file') }), 'searchlight-diff');
+	assert.equal(classifyEditorInput({ original: uri('lighthouse-diff'), modified: uri('file') }), 'lighthouse-diff');
 	assert.equal(classifyEditorInput({ uri: uri('file') }), 'text-editor');
 	assert.equal(classifyEditorInput({ uri: uri('vscode-remote') }), 'text-editor');
 	assert.equal(classifyEditorInput({ uri: uri('custom-private-scheme') }), 'other');
-	assert.equal(classifyEditorInput({ textDiffs: [{ original: uri('searchlight-diff'), modified: uri('file') }] }), 'searchlight-diff');
+	assert.equal(classifyEditorInput({ textDiffs: [{ original: uri('lighthouse-diff'), modified: uri('file') }] }), 'lighthouse-diff');
 	assert.equal(classifyEditorInput(undefined), 'none');
 	assert.equal(classifyEditorInput({ viewType: 'private-view-title' }), 'other');
 });
@@ -98,12 +98,12 @@ function commentFixture() {
 		addReply() { return {}; }, addThreadTags() {}, addThread() {},
 		setThreadState: (value, id, state) => { value.threads.find((thread) => thread.id === id).state = state; return true; },
 	};
-	const { SearchlightCommentController } = loadCompiled('commentController', {
+	const { LighthouseCommentController } = loadCompiled('commentController', {
 		vscode, './reviewStore': store, './git': { getGitUserName: async () => 'private-author' },
 		'./perf': { perf() {}, perfLine() {} },
 		'./usage': { recordUsage: (event, fields) => usage.push({ event, fields }) },
 	});
-	const controller = new SearchlightCommentController(() => active, async () => {
+	const controller = new LighthouseCommentController(() => active, async () => {
 		initializationCount++;
 		active.review = review;
 	});
