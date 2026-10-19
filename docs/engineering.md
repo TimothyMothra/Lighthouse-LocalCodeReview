@@ -85,6 +85,48 @@ code --list-extensions --show-versions | Select-String lighthouse
 # Compare the reported timothymothra.lighthouse version with package.json.
 ```
 
+### Calendar versioning
+
+The extension uses `YYYY.MMDD.revision`: the year, a numeric `month * 100 + day`, and a
+revision starting at 1 for each new calendar date. For example:
+
+| Build date / revision | Extension version |
+| --- | --- |
+| October 19, 2026, first build | `2026.1019.1` |
+| October 19, 2026, second build | `2026.1019.2` |
+| October 20, 2026, first build | `2026.1020.1` |
+| January 2, 2027, first build | `2027.102.1` |
+
+Numeric components cannot have leading zeros. Use the maintainer's local calendar date when
+manually assigning a version. A new distributable build needs a new version; local rebuilds may
+reuse the current version. Compile, package and deploy commands do not change it automatically.
+Do not backdate releases or reuse published versions: each new publication must be greater than
+the previous version.
+
+When a version change is requested, synchronize the manifest and both root lockfile version
+fields without creating a commit/tag or running version lifecycle scripts:
+
+```powershell
+npm version <YYYY.MMDD.revision> --no-git-tag-version --ignore-scripts
+```
+
+Then update the title of the `lighthouse` Activity Bar container in
+`package.json` under `contributes.viewsContainers.activitybar` to
+`<displayName> (<version>)`, currently `Lighthouse: Local Code Review (2026.1019.1)`.
+This is the native header above Comparison, not the Comparison pane's own name.
+VS Code reads a static string here; version placeholders are not expanded automatically.
+Keep the extension ID and Marketplace display name unchanged when updating only this header.
+
+VS Code Marketplace requires three numeric components; neither `2026.10.19.1` nor a suffix such
+as `2026.1019.1-dev` is the publishing format. Use `--pre-release` explicitly when requested
+to package/publish a pre-release; the calendar version alone does not select that channel.
+Preview and stable builds need distinct versions. VS Code can move a pre-release user to a
+higher stable version, so order versions across both channels deliberately.
+
+The deploy helper automatically selects `lighthouse-<version>.vsix`. After a version bump,
+build/package the new artifact before using `-InstallOnly`; an older VSIX still contains its
+older manifest version and must not just be renamed.
+
 ### Comparison regression tests
 
 Run `npm test` to compile and execute the built-in Node test runner. The baseline regression suite

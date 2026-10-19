@@ -40,6 +40,23 @@ Run only the requested operation: a build does not authorize installation, reloa
 changes. Do not reinstall dependencies as part of every local iteration. Do not stage,
 commit, push or create branches/worktrees without explicit instruction.
 
+## Versioning
+
+Use calendar versions `YYYY.MMDD.revision`, with the middle component computed as
+`month * 100 + day` (no leading zeros). For example, October 19's first build is
+`2026.1019.1`; January 2's is `2026.102.1`.
+Start the revision at 1 on a new calendar date and increment it manually for each new
+distributable build on that date. Compile, package and deploy commands must not auto-bump it.
+
+Keep `package.json`, the lockfile's top-level version and `packages[""].version` synchronized.
+Also update the `lighthouse` Activity Bar container's title in `contributes.viewsContainers`
+to `<displayName> (<version>)`, for example `Lighthouse: Local Code Review (2026.1019.1)`.
+VS Code reads this as static text; it does not interpolate the manifest version.
+Do not use version suffixes such as `-dev`; Marketplace prereleases use a numeric version
+and the explicit `--pre-release` packaging/publishing flag. A version bump does not authorize
+Git changes or publication. See [engineering.md](../docs/engineering.md#calendar-versioning)
+for the version command and update-ordering rules.
+
 ## Review-file guidance versus contributor instructions
 
 These instructions help develop Lighthouse itself. They are not installed into repositories

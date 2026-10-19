@@ -2,7 +2,7 @@
   "name": "lighthouse",
   "displayName": "Lighthouse: Local Code Review",
   "description": "Local-only code review with reviews, threads, and Copilot-ready comment schema.",
-  "version": "0.0.1",
+  "version": "2026.1019.1",
   "publisher": "TimothyMothra",
   "private": true,
   "license": "MIT",
@@ -42,7 +42,7 @@
       "activitybar": [
         {
           "id": "lighthouse",
-          "title": "Lighthouse",
+          "title": "Lighthouse: Local Code Review (2026.1019.1)",
           "icon": "media/lighthouse.svg"
         }
       ]
