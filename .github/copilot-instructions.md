@@ -30,6 +30,10 @@ for installation. VSCE is a local dev dependency, not a required global tool.
 | Reinstall the existing package without rebuilding | `pwsh -File .\scripts\deploy-local.ps1 -InstallOnly` |
 | Run regression tests | `npm test` |
 
+The Windows CI workflow in `.github/workflows/ci.yml` runs `npm ci` and `npm test` using
+Node 22 on pushes to `main` and pull requests. It has read-only repository permissions and no
+publishing/deployment steps. Keep action references pinned to reviewed commit SHAs.
+
 The deploy helper reads name/version from `package.json`, selects `<name>-<version>.vsix`,
 and works independently of the caller's working directory when invoked by its full path.
 After installation, use **Developer: Reload Window** in the target VS Code.

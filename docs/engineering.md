@@ -31,6 +31,8 @@ installed, authenticated CLI, appropriate tool permissions, and schema guidance.
 | `src/` | TypeScript sources (see the module graph in `architecture.md`) |
 | `out/` | Compiled `*.js` (gitignored build output; what VS Code actually runs) |
 | `scripts/deploy-local.ps1` | Package + sideload into the host VS Code |
+| `.github/workflows/ci.yml` | Read-only-permission Windows CI: locked restore, compile and existing regression suites on Node 22 |
+| `SUPPORT.md` | Troubleshooting, safe diagnostic sharing and bug-report checklist |
 | `scripts/comparison.test.cjs` | Git ancestry, automatic-target, comparison-state, and webview regression tests |
 | `scripts/reviewed-files.test.cjs` | Saved-content checklist invalidation, dirty-checkbox UX and guarded-write regressions |
 | `scripts/metadata-cache.test.cjs` | Lazy branch-local cache persistence, bounds, isolation and atomic-write/fallback regressions |
@@ -71,6 +73,11 @@ npm run compile                 # TypeScript -> out/ only
 npx @vscode/vsce package         # compile via vscode:prepublish, then package only
 npm test                        # when requested: compile + Node regression suites
 ```
+
+The Windows [CI workflow](../.github/workflows/ci.yml) uses Node 22 and runs `npm ci` followed
+by `npm test` on pushes to `main` and pull requests. Actions are pinned to commit SHAs.
+This is a regression gate, not packaged Extension Host or clean-machine release certification;
+it does not package, deploy or publish the extension and needs no publishing credentials.
 
 - **Never commit `*.vsix`** — these are gitignored build outputs.
 - Local installation uses `code --install-extension ... --force`; it does not publish to the
@@ -149,7 +156,9 @@ No test stages, commits, or changes branches in the developer's repository.
   `https://github.com/TimothyMothra/Lighthouse-LocalCodeReview.git`.
 - `activationEvents`: `onStartupFinished` plus
   `workspaceContains:.vscode/lighthouse-reviews/**/comments.json`.
-- `capabilities.untrustedWorkspaces.supported`: `true` (works in Restricted Mode).
+- `capabilities.untrustedWorkspaces.supported`: `false` (requires workspace trust before activation).
+- `capabilities.virtualWorkspaces.supported`: `false` (requires a disk-backed Git working tree).
+- Marketplace icon: `media/lighthouse.png`; the Activity Bar continues to use `media/lighthouse.svg`.
 - **~40 commands** and three views under the `lighthouse` container; commit rows are inside Comparison.
 - Comparison title-bar order: `collapseAllCommits@0` · `copyCompareBranch@1` · `copyComparePath@2` · `openTerminal@3` ·
   `refreshAll@4`.

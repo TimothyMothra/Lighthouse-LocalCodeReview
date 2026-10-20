@@ -70,7 +70,9 @@ For debugging without installation, select **Run Extension** in VS Code and pres
 checked-in launch configuration compiles and opens an Extension Development Host.
 See [engineering.md](./docs/engineering.md) for compile-only, package-only and test commands.
 
-Core review requires VS Code and Git on `PATH`; it does not require Copilot or a separate
+Core review requires a trusted, disk-backed workspace, VS Code and Git on `PATH`.
+Lighthouse is disabled in Restricted Mode and virtual workspaces; only grant trust to code you
+have reviewed and trust. Core review does not require Copilot or a separate
 Node.js installation when using an already-built VSIX. Ask Copilot additionally requires an
 installed, authenticated `copilot` CLI and the permissions needed for the requested actions.
 The review-store location assumes a single workspace folder; other platforms and remote/virtual
@@ -114,6 +116,9 @@ Full knowledge base in [`docs/`](./docs/README.md):
   commit conventions.
 
 See [`DEMO.md`](./DEMO.md) for the repeatable demo path and how to capture the screenshot above.
+
+For troubleshooting, relevant diagnostics and the bug-report checklist, see
+[`SUPPORT.md`](./SUPPORT.md).
 
 ## License
 

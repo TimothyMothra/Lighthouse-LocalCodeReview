@@ -6,6 +6,7 @@
   "publisher": "TimothyMothra",
   "private": true,
   "license": "MIT",
+  "icon": "media/lighthouse.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/TimothyMothra/Lighthouse-LocalCodeReview.git"
@@ -34,7 +35,12 @@
   "main": "./out/extension.js",
   "capabilities": {
     "untrustedWorkspaces": {
-      "supported": true
+      "supported": false,
+      "description": "Lighthouse runs Git and optional Copilot CLI commands and writes local review files. A trusted workspace is required."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Lighthouse requires a disk-backed Git working tree. Virtual workspaces are not supported."
     }
   },
   "contributes": {
