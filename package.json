@@ -2,7 +2,7 @@
   "name": "lighthouse",
   "displayName": "Lighthouse: Local Code Review",
   "description": "Local-only code review with reviews, threads, and Copilot-ready comment schema.",
-  "version": "2026.1019.1",
+  "version": "2026.1020.2",
   "publisher": "TimothyMothra",
   "private": true,
   "license": "MIT",
@@ -33,6 +33,9 @@
     "workspaceContains:.vscode/lighthouse-reviews/**/comments.json"
   ],
   "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
@@ -48,7 +51,7 @@
       "activitybar": [
         {
           "id": "lighthouse",
-          "title": "Lighthouse: Local Code Review (2026.1019.1)",
+          "title": "Lighthouse: Local Code Review (2026.1020.2)",
           "icon": "media/lighthouse.svg"
         }
       ]
@@ -90,6 +93,10 @@
       }
     ],
     "commands": [
+      {
+        "command": "lighthouse.configureCopilotMcp",
+        "title": "Lighthouse: Configure Copilot CLI MCP"
+      },
       {
         "command": "lighthouse.newConversation",
         "title": "Lighthouse: New Thread",
@@ -377,6 +384,11 @@
     "menus": {
       "view/title": [
         {
+          "command": "lighthouse.configureCopilotMcp",
+          "when": "view == lighthouse.comparison",
+          "group": "1_configuration@0"
+        },
+        {
           "command": "lighthouse.newConversation",
           "when": "view == lighthouse.conversations",
           "group": "navigation@-1"
@@ -542,19 +554,26 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "version:prepare": "node scripts/build-version.cjs prepare",
+    "version:check": "node scripts/build-version.cjs check",
+    "vscode:prepublish": "npm run version:check && npm run compile",
+    "compile": "tsc -p ./ && tsc -p tsconfig.mcp.json && node scripts/build-mcp.cjs",
     "test": "npm run compile && node --test",
     "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^20.11.0",
+    "@types/proper-lockfile": "^4.1.4",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.9.2",
-    "typescript": "^5.4.0"
+    "esbuild": "0.28.2",
+    "typescript": "^5.4.0",
+    "zod": "^3.25.76"
   },
   "dependencies": {
-    "markdown-it": "^14.3.1"
+    "markdown-it": "^14.3.1",
+    "proper-lockfile": "^4.1.2"
   }
 }

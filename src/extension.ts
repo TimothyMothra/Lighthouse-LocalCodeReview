@@ -52,6 +52,7 @@ import { classifyEditorInput, editorInputIdentity } from './usageContext';
 import { ConversationDocumentProvider, CONVERSATION_SCHEME } from './conversationDocument';
 import { ConversationPages, CONVERSATION_PAGE_TYPE } from './conversationPage';
 import { ReviewedFiles } from './reviewedFiles';
+import { mcpStorageDirectory } from './mcpIdentity';
 
 /** Shared "Lighthouse" output channel for user-visible git/action feedback. Assigned in `activate`. */
 let outputChannel: vscode.OutputChannel | undefined;
@@ -143,6 +144,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	};
 	const independentCommands = new Set([
 		'lighthouse.exportStartupDiagnostics', 'lighthouse.openThreadLocation',
+		'lighthouse.configureCopilotMcp',
 		'lighthouse.viewConversation',
 		'lighthouse.createOrReply', 'lighthouse.resolveThread', 'lighthouse.unresolveThread',
 		'lighthouse.toggleThreadResolved', 'lighthouse.askCopilotThread', 'lighthouse.askCopilotReview',
@@ -171,6 +173,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			},
 		}, { webviewOptions: { retainContextWhenHidden } });
 	context.subscriptions.push(
+		registerCommand('lighthouse.configureCopilotMcp', async () => {
+			const integration = await import('./mcpConfiguration');
+			await integration.configureCopilotMcp(context);
+		}),
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration('lighthouse.perfLogging')) {
 				setDiagnosticsEnabled(vscode.workspace.getConfiguration('lighthouse').get<boolean>('perfLogging', true));
@@ -195,6 +201,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			}
 		}),
 	);
+	// ASSUMPTION: GUI and script setup share this marker; do not edit VS Code's private state from a script.
+	if (context.extensionPath && path.isAbsolute(context.extensionPath) &&
+		(!vscode.env.remoteName || context.extension.extensionKind === vscode.ExtensionKind.Workspace)) {
+		void import('fs/promises').then(async (fs) => {
+			try { await fs.access(path.join(mcpStorageDirectory(), 'installation.json')); }
+			catch (error) {
+				if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') { return; }
+				throw error;
+			}
+			const integration = await import('./mcpConfiguration');
+			await integration.refreshCopilotMcp(context);
+		}).catch(() => {
+			void vscode.window.showWarningMessage('Lighthouse MCP refresh could not load. Run Configure Copilot CLI MCP to repair the integration.');
+		});
+	}
 
 	// ASSUMPTION: these are shared extension-host signals, not CPU/memory attributed to Lighthouse.
 	let hostTimer: ReturnType<typeof setInterval> | undefined;

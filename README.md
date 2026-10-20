@@ -7,7 +7,7 @@ Core review workflows work offline; optional Copilot and explicit Git network ac
 the network.
 
 > **Status:** local-only, single-developer tool. The extension **never calls a language model
-> directly** — all AI work happens through an external `copilot` CLI shell-out. Reviews live under
+> directly** — AI work stays in the external Copilot CLI. Reviews live under
 > `.vscode/lighthouse-reviews/` (no review server or database), a superset of — and never a
 > clobber of — the original `Gururagavendra.local-pr-review` format.
 
@@ -40,6 +40,9 @@ widget-service code and review comments — see [`DEMO.md`](./DEMO.md)._
 - **Ask Copilot round-trip** — hand a review thread to the `copilot` CLI; when the agent writes its
   reply back into `comments.json`, a file watcher reloads and re-renders it in-thread. The extension
   only ever *shells out* — it never calls a model itself.
+- **Optional MCP tools for your existing CLI session** — discover reviews, read a thread index
+  with initial-comment previews, read complete discussions, and append agent replies. The local
+  stdio server is bundled with Lighthouse; it never calls a model or submits prompts itself.
 - **Plain-JSON storage** — reviews are human-readable JSON under `.vscode/lighthouse-reviews/`,
   created lazily on first mutation so clean repos stay clean. Durable thread ids and v1/v2
   back-compat are preserved on every write.
@@ -59,8 +62,9 @@ pwsh -File .\scripts\deploy-local.ps1
 ```
 
 For later source edits, rerun only the deploy command, then use **Developer: Reload Window** in
-VS Code. The helper reads the package name/version from `package.json`; no script edit is needed
-after a version change. To reinstall the existing VSIX without rebuilding:
+VS Code. Each new source build prepares today's calendar version once and synchronizes the
+manifest, lockfile and native header. Packaging rejects stale dates or split metadata.
+To reinstall the existing VSIX without preparing another version or rebuilding:
 
 ```powershell
 pwsh -File .\scripts\deploy-local.ps1 -InstallOnly
@@ -90,6 +94,55 @@ into a reviewed repository. Ask Copilot sends a short schema hint and assumes ad
 guidance is supplied separately. The repo's
 [Copilot instructions](./.github/copilot-instructions.md) are for developing Lighthouse itself,
 not an agent contract distributed to extension users.
+
+## Optional Copilot CLI MCP integration
+
+The server is named **`lighthouse-codereview`** to avoid collisions with unrelated Lighthouse
+tools. The VSIX includes the standalone server and a headless setup helper. MCP use additionally
+requires **Node.js 22+**, Git, and Copilot CLI on the same local filesystem; core review is unchanged.
+
+The recommended local workflow builds/installs the extension, registers its user-level MCP entry,
+and verifies the standalone payload without model calls:
+
+```powershell
+pwsh -File .\scripts\setup-mcp.ps1 -WhatIf   # optional no-change preview
+pwsh -File .\scripts\setup-mcp.ps1           # confirm the setup operation
+```
+
+Use `-VsixPath` for a current prebuilt package, or `-UseInstalledExtension` after installation
+from another source. The script does not reload a working editor or restart an agent: finish
+with **Developer: Reload Window**, start a fresh CLI session in the reviewed worktree, and
+inspect **`lighthouse-codereview`** in `/mcp`.
+
+See **[Local MCP setup](./docs/mcp-setup.md)** for the automated path, complete manual fallback
+checklist, custom paths/profiles, owned-legacy migration, limits, and troubleshooting.
+
+| Tool | Result |
+|---|---|
+| `list_reviews` | Saved comparisons, identifiers, branches, counts, and explicit read/discovery issues |
+| `get_review` | Thread index with location, state, tags, author, counts, and the first **64 Unicode characters of the initial comment** |
+| `get_thread` | Complete comment bodies, author metadata, reply links, and a revision for subsequent writes |
+| `reply_to_thread` | An agent reply appended to an existing thread, without changing its resolved state |
+
+Read pages default to 50 items and allow up to 200; follow `nextCursor` to read more. Changed
+data invalidates old cursors explicitly. Replies are limited to 64 KiB UTF-8; review files to
+16 MiB and individual tool results to 1 MiB. Oversized content is an error, never silently
+truncated. Legacy threads without persisted IDs are readable but not writable through MCP.
+
+Copilot should read the thread, then submit its revision and a unique request ID with its reply.
+Retrying the same request does not append a duplicate. Tool descriptions include this contract;
+MCP users do not need to locate or manually edit the JSON schema. Replies coordinate with
+updated Lighthouse writers, and the existing file watcher refreshes open discussions.
+
+Registration is **once per user/CLI profile**, not per repository. Each stdio process uses its
+CLI launch worktree; no HTTP listener, cloud service, automatic agent, or per-repository config
+is needed. Normal CLI trust, tool permissions, disabled-server settings, and organization
+policy still apply. Installation alone does not register or connect it.
+
+The GUI command **Lighthouse: Configure Copilot CLI MCP** remains the manual setup/repair/removal
+fallback, available in the top **Comparison** section's **…** menu and the Command Palette.
+Only verified owned registrations using the old `lighthouse` name are migrated;
+unrelated servers and intentional disablements are preserved.
 
 Performance and feature-usage logging are local and enabled by default; there is no remote
 telemetry upload. See [startup diagnostics](./docs/startup-diagnostics.md) and

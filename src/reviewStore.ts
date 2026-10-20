@@ -1,74 +1,42 @@
 /**
- * Write layer for Lighthouse `comments.json` files.
- *
- * Reading is handled by reviewModel.ts (tolerant of v1 + v2). This module owns MUTATION and
- * SERIALIZATION: it always writes schema **v2** (version:2, object `author`, thread `tags[]`,
- * comment `replyTo`). A v1 file read in is transparently upgraded to v2 on the next write, while
- * preserving whatever author information was present (a bare-string v1 author becomes
- * `{kind:"unknown", name:<string>}`).
- *
- * All mutations operate on the in-memory `Review` model and then persist the whole file, so the
- * on-disk JSON stays canonical and diff-friendly (2-space indent, trailing newline).
+ * VS Code adapter for review discovery and shared, coordinated v2 persistence.
+ * The standalone MCP server uses the same model/core without importing this module.
  */
-
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { Review, ReviewAuthor, ReviewComment, ReviewThread, parseReview, normalizeSeq } from './reviewModel';
+import { Review, parseReview } from './reviewModel';
 import { event, trace } from './diagnostics';
+import { missing, ReviewIO, saveReviewFile, updateReviewFile, withReviewFileLock } from './reviewPersistence';
+export { newId, serializeReview, humanAuthor, addComment, addReply, setThreadState, addThreadTags, addThread, addGeneralThread } from './reviewCore';
 
 /** ASSUMPTION: existing stores are moved once by the user; discovery uses only the Lighthouse namespace. */
 export const REVIEWS_GLOB = '.vscode/lighthouse-reviews/**/comments.json';
-
 const discoveryInFlight = new Map<string, Promise<vscode.Uri[]>>();
-const mutationTails = new Map<string, Promise<void>>();
-
-export function queueReviewUpdate<T>(file: string, operation: () => Promise<T>): Promise<T> {
-	const key = process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
-	const result = (mutationTails.get(key) ?? Promise.resolve()).then(operation);
-	const tail = result.then(() => undefined, () => undefined);
-	mutationTails.set(key, tail);
-	void tail.then(() => { if (mutationTails.get(key) === tail) { mutationTails.delete(key); } });
-	return result;
-}
 
 export async function readReviewText(file: string): Promise<string | undefined> {
-	try {
-		return Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.file(file))).toString('utf8');
-	} catch (error) {
-		if (isMissing(error)) { return undefined; }
-		throw error;
-	}
+	try { return Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.file(file))).toString('utf8'); }
+	catch (error) { if (missing(error)) { return undefined; } throw error; }
 }
 
-export function updateReview<T>(
-	file: string,
-	mutate: (review: Review) => T | Promise<T>,
-	options: { seed?: Review; beforeWrite?: () => void | Promise<void> } = {},
-): Promise<{ review: Review; value: T }> {
-	return queueReviewUpdate(file, async () => {
-		const raw = await readReviewText(file);
-		const review = raw === undefined
-			? options.seed && parseReview(JSON.stringify(serializeReview(options.seed)), file)
-			: parseReview(raw, file);
-		if (!review) { throw new Error('The saved review is missing or invalid. Refresh before trying again.'); }
-		const before = JSON.stringify(review);
-		const value = await mutate(review);
-		if (JSON.stringify(review) !== before || raw === undefined) {
-			await saveReview(review, async () => {
-				await options.beforeWrite?.();
-				// ASSUMPTION: this guards observed external edits, not an atomic cross-process CAS.
-				if (await readReviewText(file) !== raw) {
-					throw new Error('The review changed while saving. Refresh and try again.');
-				}
-			});
-		}
-		return { review, value };
-	});
+const io: ReviewIO = {
+	read: readReviewText,
+	async mkdir(directory) { await vscode.workspace.fs.createDirectory(vscode.Uri.file(directory)); },
+	async write(file, text) { await vscode.workspace.fs.writeFile(vscode.Uri.file(file), Buffer.from(text, 'utf8')); },
+	async rename(source, target) { await vscode.workspace.fs.rename(vscode.Uri.file(source), vscode.Uri.file(target), { overwrite: true }); },
+	async remove(file) {
+		try { await vscode.workspace.fs.delete(vscode.Uri.file(file)); }
+		catch (error) { if (!missing(error)) { throw error; } }
+	},
+	lock: withReviewFileLock,
+};
+
+export function updateReview<T>(file: string, mutate: (review: Review) => T | Promise<T>,
+	options: { seed?: Review; beforeWrite?: () => void | Promise<void> } = {}): Promise<{ review: Review; value: T }> {
+	return updateReviewFile(file, mutate, { ...options, io });
 }
 
-function isMissing(error: unknown): boolean {
-	return typeof error === 'object' && error !== null && 'code' in error &&
-		(error.code === 'FileNotFound' || error.code === 'ENOENT');
+export function saveReview(review: Review, beforeWrite?: () => Promise<void>): Promise<void> {
+	return saveReviewFile(review, beforeWrite, io);
 }
 
 function discoverReviews(folder: vscode.Uri): Promise<vscode.Uri[]> {
@@ -83,51 +51,32 @@ function discoverReviews(folder: vscode.Uri): Promise<vscode.Uri[]> {
 	const pending = trace('reviews.discover', async () => {
 		const files: vscode.Uri[] = [];
 		const directories = [root];
-		let directoryCount = 0;
-		let skippedLinks = 0;
+		let directoryCount = 0, skippedLinks = 0;
 		while (directories.length) {
 			const directory = directories.pop()!;
 			let entries: [string, vscode.FileType][];
-			try {
-				entries = await trace('reviews.readDirectory', async () => vscode.workspace.fs.readDirectory(directory));
-			} catch (error) {
-				if (!isMissing(error)) { throw error; }
+			try { entries = await trace('reviews.readDirectory', async () => vscode.workspace.fs.readDirectory(directory)); }
+			catch (error) {
+				if (!missing(error)) { throw error; }
 				event('reviews.directoryMissing');
 				continue;
 			}
 			directoryCount++;
 			for (const [name, type] of entries) {
-				// ASSUMPTION: review storage contains ordinary directories. Do not follow linked
-				// directories out of this small subtree or into cycles; report any skipped links.
-				if ((type & vscode.FileType.SymbolicLink) && !(type & vscode.FileType.File)) {
-					skippedLinks++;
-					continue;
-				}
+				// ASSUMPTION: stores are ordinary directories; do not follow links into other repositories or cycles.
+				if ((type & vscode.FileType.SymbolicLink) && !(type & vscode.FileType.File)) { skippedLinks++; continue; }
 				const uri = vscode.Uri.joinPath(directory, name);
-				if (type & vscode.FileType.Directory) {
-					directories.push(uri);
-				} else if ((type & vscode.FileType.File) &&
-					(process.platform === 'win32' ? name.toLowerCase() : name) === 'comments.json') {
-					files.push(uri);
-				}
+				if (type & vscode.FileType.Directory) { directories.push(uri); }
+				else if ((type & vscode.FileType.File) && (process.platform === 'win32' ? name.toLowerCase() : name) === 'comments.json') { files.push(uri); }
 			}
 		}
 		event('reviews.discovered', { fileCount: files.length, directoryCount, skippedLinks });
 		return files;
-	}).finally(() => {
-		if (discoveryInFlight.get(key) === pending) { discoveryInFlight.delete(key); }
-	});
+	}).finally(() => { if (discoveryInFlight.get(key) === pending) { discoveryInFlight.delete(key); } });
 	discoveryInFlight.set(key, pending);
 	return pending;
 }
 
-/** A short, unique-enough id for a new comment/thread (no external uuid dependency). */
-export function newId(prefix: string): string {
-	const rand = Math.random().toString(36).slice(2, 8);
-	return `${prefix}-${Date.now().toString(36)}-${rand}`;
-}
-
-/** Find + parse every review file across all workspace folders (stable-sorted by path). */
 export async function scanReviews(): Promise<Review[]> {
 	return trace('reviews.scan', async () => {
 		const folders = vscode.workspace.workspaceFolders ?? [];
@@ -137,12 +86,7 @@ export async function scanReviews(): Promise<Review[]> {
 		for (const folder of folders) {
 			const uris = await discoverReviews(folder.uri);
 			fileCount += uris.length;
-			for (const uri of uris) {
-				const review = await loadReview(uri);
-				if (review) {
-					found.push(review);
-				}
-			}
+			for (const uri of uris) { const review = await loadReview(uri); if (review) { found.push(review); } }
 		}
 		found.sort((a, b) => a.sourceFile.localeCompare(b.sourceFile));
 		event('reviews.scanResult', { fileCount, reviewCount: found.length, skippedCount: fileCount - found.length });
@@ -150,7 +94,6 @@ export async function scanReviews(): Promise<Review[]> {
 	});
 }
 
-/** Read + parse a comments.json file into a Review, or undefined if missing/invalid. */
 export async function loadReview(uri: vscode.Uri): Promise<Review | undefined> {
 	return trace('reviews.load', async () => {
 		let phase = 'read';
@@ -158,286 +101,28 @@ export async function loadReview(uri: vscode.Uri): Promise<Review | undefined> {
 			const bytes = await trace('reviews.read', async () => vscode.workspace.fs.readFile(uri));
 			phase = 'parse';
 			return await trace('reviews.parse', async () => {
-				const text = Buffer.from(bytes).toString('utf8');
-				const review = parseReview(text, uri.fsPath);
-				// ASSUMPTION: the tolerant parser reports invalid input as undefined; do not reparse
-				// or log content/paths just to distinguish those results from filesystem failures.
+				const review = parseReview(Buffer.from(bytes).toString('utf8'), uri.fsPath);
 				event('reviews.loadResult', {
-					outcome: review ? 'loaded' : 'invalidParse',
-					byteCount: bytes.byteLength,
-					threadCount: review?.threads.length,
-					commentCount: review?.threads.reduce((count, thread) => count + thread.comments.length, 0),
+					outcome: review ? 'loaded' : 'invalidParse', byteCount: bytes.byteLength,
+					threadCount: review?.threads.length, commentCount: review?.threads.reduce((count, thread) => count + thread.comments.length, 0),
 				});
 				return review;
 			});
 		} catch (error) {
-			const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
-			event('reviews.loadResult', {
-				outcome: phase === 'read' && (code === 'FileNotFound' || code === 'ENOENT') ? 'missing' : 'error',
-				phase,
-			});
+			event('reviews.loadResult', { outcome: phase === 'read' && missing(error) ? 'missing' : 'error', phase });
 			return undefined;
 		}
 	});
 }
 
-// ── Serialization (always emits v2) ─────────────────────────────────────────
-
-function serializeAuthor(author: ReviewAuthor | undefined): Record<string, unknown> | undefined {
-	if (!author) {
-		return undefined;
-	}
-	const out: Record<string, unknown> = { kind: author.kind, name: author.name };
-	if (author.model) {
-		out.model = author.model;
-	}
-	if (author.reasoning) {
-		out.reasoning = author.reasoning;
-	}
-	if (author.version) {
-		out.version = author.version;
-	}
-	if (author.sessionId) {
-		out.sessionId = author.sessionId;
-	}
-	return out;
+export function computeReviewPaths(workspaceFolderFsPath: string, compare: string, base: string): { reviewDir: string; sourceFile: string } {
+	const reviewDir = path.join(workspaceFolderFsPath, '.vscode', 'lighthouse-reviews', `${compare.replace(/\//g, '-')}_${base.replace(/\//g, '-')}`);
+	return { reviewDir, sourceFile: path.join(reviewDir, 'comments.json') };
 }
 
-function serializeComment(comment: ReviewComment): Record<string, unknown> {
-	const out: Record<string, unknown> = {
-		id: comment.id ?? newId('c'),
-		body: comment.body,
-	};
-	if (comment.timestamp) {
-		out.timestamp = comment.timestamp;
-	}
-	if (comment.replyTo) {
-		out.replyTo = comment.replyTo;
-	}
-	const author = serializeAuthor(comment.author);
-	if (author) {
-		out.author = author;
-	}
-	// Additive: only write per-comment tags when present, to keep files diff-friendly and back-compat.
-	if (comment.tags && comment.tags.length > 0) {
-		out.tags = comment.tags;
-	}
-	return out;
-}
-
-function serializeThread(thread: ReviewThread): Record<string, unknown> {
+export function emptyReview(workspaceFolderFsPath: string, compare: string, base: string, compareCommit?: string, baseCommit?: string): Review {
 	return {
-		id: thread.id ?? newId('t'),
-		...(thread.title ? { title: thread.title } : {}),
-		filePath: thread.filePath,
-		startLine: thread.startLine,
-		endLine: thread.endLine ?? thread.startLine,
-		state: thread.state ?? 'unresolved',
-		...(thread.seq !== undefined ? { seq: thread.seq } : {}),
-		tags: thread.tags,
-		...(thread.anchorText !== undefined ? { anchorText: thread.anchorText } : {}),
-		comments: thread.comments.map(serializeComment),
+		version: 2, sourceBranch: compare, targetBranch: base, sourceCommit: compareCommit, targetCommit: baseCommit,
+		threads: [], reviewedFiles: [], seqCounter: 0, sourceFile: computeReviewPaths(workspaceFolderFsPath, compare, base).sourceFile,
 	};
-}
-
-/** Produce the canonical v2 on-disk object for a Review. */
-export function serializeReview(review: Review): Record<string, unknown> {
-	return {
-		version: 2,
-		sourceBranch: review.sourceBranch,
-		targetBranch: review.targetBranch,
-		sourceCommit: review.sourceCommit,
-		targetCommit: review.targetCommit,
-		threads: review.threads.map(serializeThread),
-		// Only emit reviewedFiles when non-empty, to keep files diff-friendly.
-		...(review.reviewedFiles && review.reviewedFiles.length > 0
-			? { reviewedFiles: review.reviewedFiles }
-			: {}),
-		...(review.reviewedFileSnapshots && Object.keys(review.reviewedFileSnapshots).length > 0
-			? { reviewedFileSnapshots: review.reviewedFileSnapshots }
-			: {}),
-		...(review.seqCounter !== undefined ? { seqCounter: review.seqCounter } : {}),
-	};
-}
-
-/** Replace `/` with `-` so a branch name is safe as a single path segment. */
-function sanitizeBranch(branch: string): string {
-	return branch.replace(/\//g, '-');
-}
-
-/**
- * Compute the storage directory and comments.json path for a comparison.
- * Layout: `<workspaceFolder>/.vscode/lighthouse-reviews/<compare>_<base>/comments.json`
- * (branch names sanitized: `/` → `-`). `compare` maps to sourceBranch, `base` to targetBranch.
- */
-export function computeReviewPaths(
-	workspaceFolderFsPath: string,
-	compare: string,
-	base: string,
-): { reviewDir: string; sourceFile: string } {
-	const dirName = `${sanitizeBranch(compare)}_${sanitizeBranch(base)}`;
-	const reviewDir = path.join(workspaceFolderFsPath, '.vscode', 'lighthouse-reviews', dirName);
-	const sourceFile = path.join(reviewDir, 'comments.json');
-	return { reviewDir, sourceFile };
-}
-
-/** Build an in-memory, not-yet-persisted v2 Review for a comparison. */
-export function emptyReview(
-	workspaceFolderFsPath: string,
-	compare: string,
-	base: string,
-	compareCommit?: string,
-	baseCommit?: string,
-): Review {
-	const { sourceFile } = computeReviewPaths(workspaceFolderFsPath, compare, base);
-	return {
-		version: 2,
-		sourceBranch: compare,
-		targetBranch: base,
-		sourceCommit: compareCommit,
-		targetCommit: baseCommit,
-		threads: [],
-		reviewedFiles: [],
-		seqCounter: 0,
-		sourceFile,
-	};
-}
-
-/** Persist a Review to its `sourceFile` as canonical v2 JSON. */
-export async function saveReview(review: Review, beforeWrite?: () => Promise<void>): Promise<void> {
-	const obj = serializeReview(review);
-	const text = JSON.stringify(obj, null, 2) + '\n';
-	const uri = vscode.Uri.file(review.sourceFile);
-	await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(review.sourceFile)));
-	await beforeWrite?.();
-	await vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'));
-}
-
-// ── Mutations ───────────────────────────────────────────────────────────────
-
-/** Build a human author block from a display name. */
-export function humanAuthor(name: string): ReviewAuthor {
-	return { kind: 'human', name };
-}
-
-/** Append a top-level comment to a thread (found by id). Returns the new comment, or undefined. */
-export function addComment(
-	review: Review,
-	threadId: string,
-	body: string,
-	author: ReviewAuthor,
-	tags: string[] = [],
-): ReviewComment | undefined {
-	const thread = review.threads.find((t) => t.id === threadId);
-	if (!thread) {
-		return undefined;
-	}
-	const comment: ReviewComment = {
-		id: newId('c'),
-		body,
-		timestamp: new Date().toISOString(),
-		author,
-		...(tags.length > 0 ? { tags: [...tags] } : {}),
-	};
-	thread.comments.push(comment);
-	return comment;
-}
-
-/** Append a reply (with `replyTo`) to a thread. Returns the new comment, or undefined. */
-export function addReply(
-	review: Review,
-	threadId: string,
-	replyToId: string | undefined,
-	body: string,
-	author: ReviewAuthor,
-	tags: string[] = [],
-): ReviewComment | undefined {
-	const thread = review.threads.find((t) => t.id === threadId);
-	if (!thread) {
-		return undefined;
-	}
-	// Default replyTo to the last comment in the thread when not specified.
-	const parent = replyToId ?? thread.comments[thread.comments.length - 1]?.id;
-	const comment: ReviewComment = {
-		id: newId('c'),
-		body,
-		timestamp: new Date().toISOString(),
-		replyTo: parent,
-		author,
-		...(tags.length > 0 ? { tags: [...tags] } : {}),
-	};
-	thread.comments.push(comment);
-	return comment;
-}
-
-/** Set a thread's resolved state. Returns true if the thread was found. */
-export function setThreadState(
-	review: Review,
-	threadId: string,
-	state: 'resolved' | 'unresolved',
-): boolean {
-	const thread = review.threads.find((t) => t.id === threadId);
-	if (!thread) {
-		return false;
-	}
-	thread.state = state;
-	return true;
-}
-
-/** Merge tags into a thread's `tags[]` (deduped, order-preserving). Returns true if found. */
-export function addThreadTags(review: Review, threadId: string, tags: string[]): boolean {
-	const thread = review.threads.find((t) => t.id === threadId);
-	if (!thread) {
-		return false;
-	}
-	for (const tag of tags) {
-		if (tag && !thread.tags.includes(tag)) {
-			thread.tags.push(tag);
-		}
-	}
-	return true;
-}
-
-/** Create a brand-new thread (with a first comment) at a file location. Returns the thread. */
-export function addThread(
-	review: Review,
-	filePath: string | undefined,
-	startLine: number | undefined,
-	endLine: number | undefined,
-	body: string,
-	author: ReviewAuthor,
-	tags: string[] = [],
-	anchorText?: string,
-): ReviewThread {
-	if (review.seqCounter === undefined) { normalizeSeq(review); }
-	const seq = (review.seqCounter ?? 0) + 1;
-	review.seqCounter = seq;
-	const thread: ReviewThread = {
-		id: newId('t'),
-		filePath,
-		startLine,
-		endLine,
-		state: 'unresolved',
-		seq,
-		tags: [...tags],
-		...(anchorText !== undefined ? { anchorText } : {}),
-		comments: [
-			{
-				id: newId('c'),
-				body,
-				timestamp: new Date().toISOString(),
-				author,
-				...(tags.length > 0 ? { tags: [...tags] } : {}),
-			},
-		],
-	};
-	review.threads.push(thread);
-	return thread;
-}
-
-/** A review-wide topic deliberately has no fake filename, range, or code anchor. */
-export function addGeneralThread(review: Review, body: string, author: ReviewAuthor, title?: string): ReviewThread {
-	const thread = addThread(review, undefined, undefined, undefined, body, author);
-	if (title?.trim()) { thread.title = title.trim(); }
-	return thread;
 }

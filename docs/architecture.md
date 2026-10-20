@@ -29,8 +29,10 @@ extension.ts ............ activation, view wiring, command registration, Ask-Cop
   │      ├─ baseline.ts ... read-only ancestry resolution and explicit baseline-pin validation
   │      ├─ git.ts ........ no-shell git helpers (changedFiles, logRange, aheadBehind, worktrees)
   │      ├─ gitApi.ts ..... thin wrapper over the built-in vscode.git extension API
-  │      └─ reviewStore.ts  load/serialize/mutate comments.json (+ durable seqCounter)
-  │             └─ reviewModel.ts .. vscode-free schema types, parse, normalizeSeq, formatTimestamp
+  │      └─ reviewStore.ts  VS Code discovery/I/O adapter
+  │             ├─ reviewModel.ts .. vscode-free schema types, parse, normalizeSeq, formatTimestamp
+  │             ├─ reviewCore.ts ... pure serialization/mutations; preserve unknown fields
+  │             └─ reviewPersistence.ts .. shared queue, interprocess lock, atomic replacement
   │
   ├─ comparisonView.ts .... WebviewView: selectors, effective baseline, commit data/actions
   │      └─ commitsWebview.ts .. embedded compact commit-tree CSS + script
@@ -53,6 +55,16 @@ extension.ts ............ activation, view wiring, command registration, Ask-Cop
   ├─ webviewMetrics.ts .... state delivery / DOM readiness / paint-opportunity protocol
   ├─ usage.ts ............. bounded local feature-action and exposure summaries
   └─ usageContext.ts ...... privacy-preserving editor-context classification
+
+mcpConfiguration.ts ..... lazy, explicit user-level setup/repair/removal command
+  └─ mcpInstallation.ts .. stable owned payload and non-destructive CLI configuration
+mcpIdentity.ts .......... lighthouse-codereview identity and shared platform user-data location
+mcp/server.ts ........... standalone stdio entry point (never imports vscode)
+  ├─ mcp/access.ts ...... launch-worktree confinement and bounded saved-review reads
+  ├─ mcp/service.ts ..... four MCP tools, previews/pagination, revisions and idempotent replies
+  └─ reviewModel / reviewCore / reviewPersistence .. shared with the UI
+mcp/setup.ts ............ bundled headless setup helper and read-only protocol verification
+scripts/setup-mcp.ps1 ... source/VSIX/installed-extension onboarding; manual refresh is left to the user
 ```
 
 ## 3. The three views
@@ -261,11 +273,12 @@ clear checks persistently, never automatically rechecking on undo. Legacy path-o
 cleared lazily on first review use without discarding discussion data. Failed validation remains
 explicitly unverified instead of treating errors as deletions.
 
-The store serializes all extension-owned read-modify-write review operations through a shared
-per-file queue, including inline comments, formal discussion pages and checklist invalidation.
-It reloads latest content and guards against observed external writes. Comparison identities and
-file-event generations prevent delayed hashes or checkbox messages from mutating another review;
-the filesystem guard does not provide cross-process atomicity.
+The store serializes read-modify-write operations through a per-file queue and cooperative
+interprocess lock, including inline comments, formal discussion pages, checklist invalidation,
+and MCP replies. It reloads latest content, preserves unrelated fields, and atomically replaces
+the file after checking for observed external writes. Comparison identities and file-event
+generations prevent delayed checkbox work from mutating another review. Non-cooperating writers
+and older extension versions are outside the lock guarantee.
 
 Review discovery walks only each workspace's `.vscode/lighthouse-reviews` subtree, not the
 workspace search index. Simultaneous discovery requests share the in-flight directory walk;
@@ -317,10 +330,10 @@ the open page without replacing the draft. Resolved threads are not silently reo
 Draft text is kept in the panel's local VS Code webview state; restored pages retain their original
 review identity even if a different branch is now active.
 
-Page writes are queued per review, reload current data, and check for observed external edits
-immediately before writing. Conflicts retain the draft rather than overwriting the observed edit.
-VS Code's file API does not offer cross-process compare-and-swap, so this is not a transactional
-lock against arbitrary external writers. Invalid/missing existing review data is never replaced
+Page writes use the same coordinated transaction as inline/checklist/MCP changes, reload current
+data, and check for observed external edits before committing. Conflicts retain the draft.
+The cooperative lock does not protect against arbitrary writers that ignore it.
+Invalid/missing existing review data is never replaced
 with an empty review. First messages create missing review directories lazily.
 
 Markdown rendering is loaded only when messages need formatting. Raw HTML is disabled, remote
@@ -331,7 +344,7 @@ be mutated through the new page.
 
 ## 7. The Ask-Copilot bridge (schema → agent contract)
 
-This is the only "AI" path, and it is a shell-out, not a model call (`askCopilot` in extension.ts):
+This explicit launch path is a shell-out, not a model call (`askCopilot` in extension.ts):
 
 ```
 reads config: copilotPath (default "copilot"), copilotArgs (default ["-p"])
@@ -351,6 +364,32 @@ instruction provider, or install instructions into reviewed repositories.
 The agent edits `comments.json`; the file watcher then reloads and re-renders the thread with the
 identity-stamped reply. **No LM API, no keys, no in-extension model call.** A self-contained,
 packaged agent contract remains publication-readiness work.
+
+### Optional MCP path (LH-CLI-007)
+
+The existing CLI session can instead launch the bundled Node stdio server and call `list_reviews`,
+`get_review`, `get_thread`, and `reply_to_thread`. It neither launches a conversation nor calls a
+model. There is no HTTP listener or background feedback-processing loop.
+
+The lazy **Configure Copilot CLI MCP** command installs an owned persistent payload/launcher and,
+after confirmation, merges one user-level **`lighthouse-codereview`** CLI entry. The PowerShell
+setup script uses the same installation implementation through the bundled headless helper.
+Both share platform-user-data storage, without writing VS Code's private state database.
+Verified matching owned `lighthouse` entries may migrate; unrelated and disabled legacy entries
+are not silently replaced/re-enabled. Setup never pins a repository. Each process
+inherits its CLI launch cwd, resolves that Git worktree (not its shared Git directory), and rejects
+store links/path escapes. The real CLI context probe verified two repositories and linked-worktree
+metadata without model calls; its client advertised no MCP roots capability. Switching `/cwd`
+inside an existing session requires restarting its MCP connection/session.
+
+The server reads only saved review JSON. Cursors are revision-bound, thread indexes contain
+64-code-point initial-comment previews, and replies use revision/idempotency guards plus the
+shared transaction. Existing file watchers refresh open discussions without replacing drafts.
+Payloads are independent of versioned extension folders; only previously enabled installations
+are refreshed, and older VS Code profiles do not downgrade a newer shared payload. CLI
+policy/disabled settings are never overridden. The setup script probes identity, tool discovery,
+and review metadata over stdio without a model call; it does not prove a running editor or CLI
+has refreshed. See [Local MCP setup](mcp-setup.md).
 
 ## 8. Data flow
 

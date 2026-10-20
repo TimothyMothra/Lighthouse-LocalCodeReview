@@ -63,7 +63,9 @@ async function fixture(t, initial = {}, timing) {
 			fs: {
 				readFile: (value) => fs.readFile(value.fsPath),
 				createDirectory: (value) => fs.mkdir(value.fsPath, { recursive: true }),
-				writeFile: async (value, bytes) => { writes.push(value.fsPath); await fs.writeFile(value.fsPath, bytes); },
+				writeFile: async (value, bytes) => { await fs.writeFile(value.fsPath, bytes); },
+				rename: async (source, target) => { await fs.rename(source.fsPath, target.fsPath); writes.push(target.fsPath); },
+				delete: (value) => fs.rm(value.fsPath, { force: true }),
 			},
 		},
 	};

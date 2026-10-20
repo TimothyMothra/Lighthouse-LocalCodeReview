@@ -153,12 +153,15 @@ an external CLI via *Ask Copilot to review*.
 
 ## Option B — Sideload the packaged `.vsix`
 
-Build (already produced): `lighthouse-0.0.1.vsix` (13 files, ~21 KB).
+Prepare and package a new calendar-versioned build, including its production dependencies.
 
 ```powershell
 # from the repo root
-npx @vscode/vsce package --allow-missing-repository --no-dependencies   # (re)build the vsix
-code --install-extension lighthouse-0.0.1.vsix                         # sideload it
+npm run version:prepare
+npx @vscode/vsce package
+$manifest = Get-Content package.json -Raw | ConvertFrom-Json
+$vsix = '{0}-{1}.vsix' -f $manifest.name, $manifest.version
+code --install-extension $vsix --force
 # open a folder that contains .vscode/lighthouse-reviews/<...>/comments.json, then verify as in Option A
 code --uninstall-extension timothymothra.lighthouse                            # clean up when done
 ```

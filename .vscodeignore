@@ -4,6 +4,7 @@
 src/**
 .gitignore
 tsconfig.json
+tsconfig.mcp.json
 **/*.map
 **/*.ts
 SCOPING.md
@@ -11,3 +12,9 @@ DEMO.md
 docs/**
 scripts/**
 *.vsix
+node_modules/retry/test/**
+node_modules/retry/example/**
+node_modules/retry/.travis.yml
+node_modules/retry/.npmignore
+node_modules/retry/Makefile
+node_modules/retry/equation.gif

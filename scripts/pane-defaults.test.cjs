@@ -60,6 +60,10 @@ test('panes put collapsed combined Comparison above Files and Conversations', ()
 	assert.equal(views[0].visibility, 'collapsed');
 	assert.ok(views.slice(1).every((view) => !view.visibility || view.visibility === 'visible'));
 	const buttons = manifest.contributes.menus['view/title'];
+	// Keep setup discoverable at the top view without adding another icon-only toolbar control.
+	const setup = buttons.find((button) => button.command === 'lighthouse.configureCopilotMcp');
+	assert.equal(setup?.when, `view == ${views[0].id}`);
+	assert.ok(setup.group && !setup.group.startsWith('navigation'));
 	assert.ok(!buttons.some((button) => button.command === 'lighthouse.commitsViewAllChanges' && button.when.includes('lighthouse.files')));
 	// Only the unused button is removed; the command remains available from the command palette.
 	assert.ok(manifest.contributes.commands.some((command) => command.command === 'lighthouse.commitsViewAllChanges'));

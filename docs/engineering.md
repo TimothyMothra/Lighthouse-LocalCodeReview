@@ -23,6 +23,8 @@ all of `node_modules` from the VSIX.
 Node.js/npm and VSCE are development/package tools, not separate prerequisites for using an
 already-built VSIX. Core review does not require Copilot; Ask Copilot separately requires the
 installed, authenticated CLI, appropriate tool permissions, and schema guidance.
+The optional MCP integration additionally requires Node.js 22+ and Git on the CLI host. Setup
+probes the chosen Node executable; it never downloads a runtime or launches Copilot.
 
 ## 2. Layout
 
@@ -39,6 +41,10 @@ installed, authenticated CLI, appropriate tool permissions, and schema guidance.
 | `docs/` | This knowledge base |
 | `package.json` | Manifest: commands, views, menus, configuration, activation |
 | `tsconfig.json` | TS config (target/module, `out/` outDir) |
+| `tsconfig.mcp.json` | Isolated Node MCP typecheck; does not change the UI's CommonJS resolution |
+| `scripts/build-mcp.cjs` | Bundle the MCP server/dependencies and transitive license notices |
+| `scripts/setup-mcp.ps1` | Script-first source/VSIX/installed-extension setup, safe user registration and no-model verification |
+| `out/mcp/` | Packaged standalone payload; no runtime npm installation or `vscode` import |
 
 ## 3. Build / package / deploy
 
@@ -70,9 +76,52 @@ These are alternatives for the requested operation, not extra prerequisites befo
 
 ```powershell
 npm run compile                 # TypeScript -> out/ only
-npx @vscode/vsce package         # compile via vscode:prepublish, then package only
+npm run version:prepare          # allocate a version for a new standalone package
+npx @vscode/vsce package         # check date/metadata, compile, then package
 npm test                        # when requested: compile + Node regression suites
 ```
+
+`compile` now typechecks the UI and MCP entry points, then bundles `server.cjs` and `setup.cjs`.
+The ordinary `watch` command remains the UI TypeScript watcher; rerun `compile` after MCP edits
+before exercising or packaging that payload. MCP SDK/schema/build dependencies are build-time
+dependencies because their runtime code is included in the bundle; `proper-lockfile` also ships
+as a production dependency for extension-owned review transactions.
+
+Focused MCP/storage validation:
+
+```powershell
+npm run compile
+node --test scripts\mcp.test.cjs scripts\mcp-registration.test.cjs scripts\mcp-configuration.test.cjs scripts\mcp-setup.test.cjs scripts\review-persistence.test.cjs scripts\review-discovery.test.cjs scripts\conversation-page.test.cjs scripts\reviewed-files.test.cjs scripts\diagnostics.test.cjs
+```
+
+These tests use synthetic Git metadata, SDK stdio clients, temporary configuration/payloads,
+and separate-process write contention. They do not change the actual CLI profile, deploy the
+VSIX, submit model prompts, or modify the developer's Git state. A real-CLI scope probe used
+one isolated user entry across two repositories and a linked-worktree fixture.
+
+The MCP payload's generated notices cover the dependencies actually included by esbuild.
+VSCE must include `out/mcp/server.cjs`, `out/mcp/setup.cjs`, any generated legal-comments files, and
+`out/mcp/THIRD-PARTY-NOTICES.txt`. Verify archive contents and run the extracted payload with
+only Node available; successful packaging alone is not proof of a live CLI connection.
+
+The primary local setup entry point is `scripts\setup-mcp.ps1`; see [Local MCP setup](mcp-setup.md).
+It handles source builds, a supplied VSIX, or an installed extension, and leaves only safe manual
+editor/agent refresh steps. Tests substitute a fake VS Code CLI and isolated user data rather
+than performing a host installation.
+
+GUI setup/repair/removal is **Lighthouse: Configure Copilot CLI MCP**. It is available without
+a workspace, previews only the proposed entry (not other servers' credentials), and preserves
+unrelated configuration. Both entry points share the `lighthouse-codereview` identity and an
+owned platform-user-data installation independent of VS Code profiles; on Windows it is
+`%LOCALAPPDATA%\Lighthouse\copilot-mcp`. Its persistent versioned payload survives deletion of old extension
+folders and works with VS Code closed. GUI setup uses the Node extension host's disk paths, not
+VS Code global-storage URI schemes. A remote workspace host may configure its own CLI, but a
+remote-window UI host must not configure a different machine's CLI.
+Activation refreshes an already-opted-in payload only
+on a newer version only; an older window/profile cannot downgrade a newer payload. Use explicit
+repair for same-version development builds. Do not silently
+overwrite edited entries or re-enable a disabled server. See the root README for operational
+limits, Node selection, custom `COPILOT_HOME`, `/cwd`, and uninstall cleanup.
 
 The Windows [CI workflow](../.github/workflows/ci.yml) uses Node 22 and runs `npm ci` followed
 by `npm test` on pushes to `main` and pull requests. Actions are pinned to commit SHAs.
@@ -104,25 +153,38 @@ revision starting at 1 for each new calendar date. For example:
 | October 20, 2026, first build | `2026.1020.1` |
 | January 2, 2027, first build | `2027.102.1` |
 
-Numeric components cannot have leading zeros. Use the maintainer's local calendar date when
-manually assigning a version. A new distributable build needs a new version; local rebuilds may
-reuse the current version. Compile, package and deploy commands do not change it automatically.
-Do not backdate releases or reuse published versions: each new publication must be greater than
-the previous version.
+Numeric components cannot have leading zeros. **Every new build, including local deployment,
+uses the maintainer's current local calendar date.** A new local build is not an exception that
+can carry yesterday's version forward.
 
-When a version change is requested, synchronize the manifest and both root lockfile version
-fields without creating a commit/tag or running version lifecycle scripts:
+`scripts\deploy-local.ps1` and source builds in `scripts\setup-mcp.ps1` prepare the version once
+before packaging. The shared `scripts\build-version.cjs` helper rolls a later date to revision 1
+and increments the revision for another new build on the same date. It synchronizes the manifest,
+both root lockfile version fields, and native Activity Bar title using npm's version operation
+with `--no-git-tag-version --ignore-scripts --offline`. It never creates a commit/tag or installs
+dependencies.
+
+For standalone packaging without those scripts:
 
 ```powershell
-npm version <YYYY.MMDD.revision> --no-git-tag-version --ignore-scripts
+npm run version:prepare
+npx @vscode/vsce package
 ```
 
-Then update the title of the `lighthouse` Activity Bar container in
-`package.json` under `contributes.viewsContainers.activitybar` to
-`<displayName> (<version>)`, currently `Lighthouse: Local Code Review (2026.1019.1)`.
-This is the native header above Comparison, not the Comparison pane's own name.
+Do not separately prepare before a new-build script; it already does so. Compile/tests do not
+allocate a version. VSCE's prepublish hook checks the date, both lock fields, and native title,
+then compiles without another increment. Stale or inconsistent metadata blocks packaging.
+Future-dated versions are not automatically downgraded. Avoid concurrent new builds in one checkout.
+
+The header is `<displayName> (<version>)`, for example
+`Lighthouse: Local Code Review (2026.1020.1)`. It is the native header above Comparison,
+not the Comparison pane's own name.
 VS Code reads a static string here; version placeholders are not expanded automatically.
-Keep the extension ID and Marketplace display name unchanged when updating only this header.
+Keep the extension ID and Marketplace display name unchanged.
+
+`-InstallOnly`, `-VsixPath`, and `-UseInstalledExtension` reuse existing artifacts without
+allocating versions; they do not authorize rebuilding changed source with a prior day's version.
+Do not reuse published versions: a new publication must still be greater than prior publications.
 
 VS Code Marketplace requires three numeric components; neither `2026.10.19.1` nor a suffix such
 as `2026.1019.1-dev` is the publishing format. Use `--pre-release` explicitly when requested
@@ -133,6 +195,9 @@ higher stable version, so order versions across both channels deliberately.
 The deploy helper automatically selects `lighthouse-<version>.vsix`. After a version bump,
 build/package the new artifact before using `-InstallOnly`; an older VSIX still contains its
 older manifest version and must not just be renamed.
+It checks the actual archive manifest/header before installation, then verifies VS Code's
+reported installed version and installed native-header metadata. These checks do not prove an
+already-running window reloaded; **Developer: Reload Window** is still a separate manual step.
 
 ### Comparison regression tests
 
@@ -158,6 +223,7 @@ No test stages, commits, or changes branches in the developer's repository.
   `workspaceContains:.vscode/lighthouse-reviews/**/comments.json`.
 - `capabilities.untrustedWorkspaces.supported`: `false` (requires workspace trust before activation).
 - `capabilities.virtualWorkspaces.supported`: `false` (requires a disk-backed Git working tree).
+- `extensionKind`: `["workspace"]` (Git, review files, and optional MCP setup run on the workspace host).
 - Marketplace icon: `media/lighthouse.png`; the Activity Bar continues to use `media/lighthouse.svg`.
 - **~40 commands** and three views under the `lighthouse` container; commit rows are inside Comparison.
 - Comparison title-bar order: `collapseAllCommits@0` · `copyCompareBranch@1` · `copyComparePath@2` · `openTerminal@3` ·

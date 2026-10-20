@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { Review, parseReview } from './reviewModel';
 import { ConversationTarget } from './conversationModel';
 import { parseConversationTarget, validateConversationReviewFile } from './conversationDocument';
-import { computeReviewPaths, emptyReview, saveReview, queueReviewUpdate, readReviewText } from './reviewStore';
+import { computeReviewPaths, emptyReview, updateReview, readReviewText } from './reviewStore';
 import { trace } from './diagnostics';
 
 interface ReviewSeed {
@@ -92,18 +92,16 @@ export async function readPageReview(reference: PageReference): Promise<{ review
 /** Serialize page mutations per review and reload the latest saved replies before every mutation. */
 export class ConversationUpdates {
 	update<T>(reference: PageReference, mutate: (review: Review) => T): Promise<{ review: Review; value: T }> {
-		return queueReviewUpdate(reference.reviewFile, async () => {
-			const snapshot = await readPageReview(reference);
-			const value = mutate(snapshot.review);
-			// ASSUMPTION: VS Code has no cross-process compare-and-swap file API. Detect observed
-			// external edits instead of overwriting them; the queue covers extension-owned mutations.
-			await saveReview(snapshot.review, async () => {
-				if (await readRaw(reference.reviewFile) !== snapshot.raw) {
-					throw new Error('The review changed while saving. Refresh and try again; your draft is retained.');
-				}
-			});
-			reference.allowCreate = false;
-			return { review: snapshot.review, value };
+		return this.persist(reference, mutate);
+	}
+
+	private async persist<T>(reference: PageReference, mutate: (review: Review) => T): Promise<{ review: Review; value: T }> {
+		const snapshot = await readPageReview(reference);
+		// ASSUMPTION: the transaction reloads under the same interprocess lock used by MCP and inline writers.
+		const result = await updateReview(reference.reviewFile, mutate, {
+			seed: snapshot.raw === undefined ? snapshot.review : undefined,
 		});
+		reference.allowCreate = false;
+		return result;
 	}
 }

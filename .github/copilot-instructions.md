@@ -10,9 +10,10 @@ This repo's knowledge base lives in [`docs/`](../docs/README.md). Read it before
 | [docs/engineering.md](../docs/engineering.md) | Build / package / deploy commands, VM verification, commit conventions |
 
 Key invariants (see docs for detail):
-- The extension **never calls a model/LM API** — all AI work is an external `copilot` CLI shell-out.
-- Reviews are plain JSON under `.vscode/lighthouse-reviews/` — no server or DB, and core
-  review workflows need no network. Explicit Copilot and Git network actions are separate.
+- The extension **never calls a model/LM API** — AI work stays in the external Copilot CLI,
+  through explicit Ask Copilot launches or the opt-in local MCP tools.
+- Reviews are plain JSON under `.vscode/lighthouse-reviews/` — no DB or core-review server,
+  and core review needs no network. Optional stdio MCP and explicit network actions are separate.
 - Commit linear on `main` with the `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>` trailer; never commit the gitignored `.vsix`.
 
 ## Local development
@@ -25,9 +26,10 @@ for installation. VSCE is a local dev dependency, not a required global tool.
 | --- | --- |
 | Set up a fresh checkout or restore changed dependencies | `npm ci` |
 | Compile only | `npm run compile` |
-| Package only (also compiles through `vscode:prepublish`) | `npx @vscode/vsce package` |
+| Prepare a new package version, then package | `npm run version:prepare`, then `npx @vscode/vsce package` |
 | Build, package and install into local VS Code | `pwsh -File .\scripts\deploy-local.ps1` |
 | Reinstall the existing package without rebuilding | `pwsh -File .\scripts\deploy-local.ps1 -InstallOnly` |
+| Build/install and opt in to user-level `lighthouse-codereview` MCP | `pwsh -File .\scripts\setup-mcp.ps1` (use `-WhatIf` for a no-change preview) |
 | Run regression tests | `npm test` |
 
 The Windows CI workflow in `.github/workflows/ci.yml` runs `npm ci` and `npm test` using
@@ -49,8 +51,20 @@ commit, push or create branches/worktrees without explicit instruction.
 Use calendar versions `YYYY.MMDD.revision`, with the middle component computed as
 `month * 100 + day` (no leading zeros). For example, October 19's first build is
 `2026.1019.1`; January 2's is `2026.102.1`.
-Start the revision at 1 on a new calendar date and increment it manually for each new
-distributable build on that date. Compile, package and deploy commands must not auto-bump it.
+Every **new build**, including a local build/install, must use the maintainer's current local
+calendar date. Never reuse a previous day's version for a new local build.
+`deploy-local.ps1` and the source-build path of `setup-mcp.ps1` run `npm run version:prepare`
+**once**: a later date resets the revision to 1; another new build on the same date increments it.
+The shared helper uses `npm version --no-git-tag-version --ignore-scripts` and updates the native
+header. It does not stage, commit, tag, publish, or install dependencies.
+
+Compile/tests never allocate versions. VSCE's prepublish hook runs `version:check` and compiles;
+it rejects stale dates or inconsistent metadata without incrementing a second time.
+For standalone packaging, run `npm run version:prepare` once before `npx @vscode/vsce package`.
+Do not separately prepare before invoking a new-build script: that script already prepares.
+Reinstalling an already-built artifact (`-InstallOnly`, `-VsixPath`, or `-UseInstalledExtension`)
+does not allocate a version. That exception is not permission to rebuild changed source with
+yesterday's version. Do not run new-build commands concurrently in the same checkout.
 
 Keep `package.json`, the lockfile's top-level version and `packages[""].version` synchronized.
 Also update the `lighthouse` Activity Bar container's title in `contributes.viewsContainers`

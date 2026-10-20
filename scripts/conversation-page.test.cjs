@@ -24,7 +24,7 @@ function fixture() {
 	const root = path.resolve('private-workspace');
 	const files = new Map(), writes = [], directories = [], panels = [], usage = [], asks = [], errors = [], clipboard = [], links = [];
 	const uri = (fsPath) => ({ fsPath, scheme: 'file', toString: () => `file:${fsPath}` });
-	let readHook;
+	let readHook, writeHook;
 	class Emitter {
 		constructor() { this.handlers = []; this.event = (handler) => { this.handlers.push(handler); return { dispose() {} }; }; }
 		fire(value) { for (const handler of this.handlers) { handler(value); } }
@@ -69,11 +69,16 @@ function fixture() {
 					return Buffer.from(files.get(value.fsPath));
 				},
 				createDirectory: async (value) => directories.push(value.fsPath),
-				writeFile: async (value, bytes) => { writes.push(value.fsPath); files.set(value.fsPath, bytes.toString()); },
+				writeFile: async (value, bytes) => { files.set(value.fsPath, bytes.toString()); writeHook?.(); },
+				rename: async (source, target) => { writes.push(target.fsPath); files.set(target.fsPath, files.get(source.fsPath)); files.delete(source.fsPath); },
+				delete: async (value) => { files.delete(value.fsPath); },
 			},
 		},
 	};
-	const store = load('reviewStore', { vscode });
+	// The in-memory file port has no on-disk inode to lock; separate-process locking is tested with real fixtures.
+	const store = load('reviewStore', { vscode, './reviewPersistence': {
+		...require('../out/reviewPersistence'), withReviewFileLock: async (_file, operation) => operation(() => {}),
+	} });
 	const document = load('conversationDocument', { vscode, './reviewStore': store });
 	const pageStore = load('conversationPageStore', { vscode, './reviewStore': store, './conversationDocument': document });
 	const hooks = {
@@ -96,6 +101,7 @@ function fixture() {
 		state: () => panels[0].messages.filter((message) => message.type === 'state').at(-1).data,
 		lastResult: () => panels[0].messages.filter((message) => message.type === 'result').at(-1),
 		setReadHook(hook) { readHook = hook; },
+		setWriteHook(hook) { writeHook = hook; },
 	};
 }
 
@@ -160,13 +166,10 @@ test('page mutations are serialized and reject observed external edits instead o
 		updates.update(second, (review) => f.store.addGeneralThread(review, 'Second', f.store.humanAuthor('Tester'))),
 	]);
 	assert.equal(JSON.parse(f.files.get(f.review.sourceFile)).threads.length, 2);
-	let reads = 0;
-	f.setReadHook((file) => {
-		if (++reads === 2) {
-			const external = JSON.parse(f.files.get(file));
-			external.threads[0].comments.push({ body: 'External Copilot reply' });
-			f.files.set(file, JSON.stringify(external));
-		}
+	f.setWriteHook(() => {
+		const file = f.review.sourceFile, external = JSON.parse(f.files.get(file));
+		external.threads[0].comments.push({ body: 'External Copilot reply' });
+		f.files.set(file, JSON.stringify(external));
 	});
 	const before = f.writes.length;
 	await assert.rejects(updates.update(first, (review) => f.store.addGeneralThread(review, 'Keep my draft', f.store.humanAuthor('Tester'))), /review changed/);

@@ -8,7 +8,7 @@ review thread to the `copilot` CLI so an agent can reply in-thread and stamp its
 
 > **Status:** local-only, single-developer tool. Published for reference; not on the Marketplace.
 > The extension **never calls a model directly** — all AI work happens through an external
-> `copilot` CLI shell-out. Storage lives under `.vscode/lighthouse-reviews/` and is a superset of,
+> Copilot CLI, through Ask Copilot or optional local MCP tools. Storage lives under `.vscode/lighthouse-reviews/` and is a superset of,
 > and never clobbers, the original `Gururagavendra.local-pr-review` format.
 
 ## Documents
@@ -18,6 +18,7 @@ review thread to the `copilot` CLI so an agent can reply in-thread and stamp its
 | [architecture.md](architecture.md) | Ownership split, the three views, activation fast-return, CommentController, the Ask-Copilot bridge, data flow, key decisions, known constraints |
 | [data-model.md](data-model.md) | On-disk layout (`registry.json` + `comments.json`), the v2 schema, v1 back-compat rules, the tag set, durable `seqCounter`, `reviewedFiles` |
 | [engineering.md](engineering.md) | Prerequisites, build/package/deploy commands, VM verification (Hyperloop + PrintWindow), the no-shell git helpers, commit conventions, known constraints |
+| [mcp-setup.md](mcp-setup.md) | Script-first `lighthouse-codereview` installation/registration, manual fallback checklist, migration and troubleshooting |
 
 For troubleshooting and bug reports, see [Support](../SUPPORT.md).
 Lighthouse requires a trusted, disk-backed workspace; Restricted Mode and virtual workspaces
@@ -61,8 +62,8 @@ Existing `conversation`-named command IDs, settings and storage remain compatibl
   **external** Copilot agent (the `copilot` CLI) *reads* that JSON, replies in-thread, and stamps an
   identity block. The extension is never an AI client.
 - **Everything is a file.** A "review" is a `comments.json` under `.vscode/lighthouse-reviews/`.
-  There is no review server, database, or core-review network dependency. Optional Copilot and
-  explicit Git network actions are separate.
+  There is no database or core-review server/network dependency. Optional Copilot, its bundled
+  stdio MCP adapter, and explicit Git network actions are separate.
 - **A comparison = base + compare.** `base` is the TARGET branch or fixed commit, `compare` is the SOURCE branch
   under review. A separate **effective baseline** is inferred from local/upstream shared ancestry
   or fixed to an explicit ancestor commit. Comparison keeps the approved Base/Compare selectors;
@@ -90,3 +91,10 @@ See [engineering.md](engineering.md) for prerequisites and individual build/test
 The schema documentation is available in this source repository, but neither `docs` nor the
 contributor `.github` instructions ship in the VSIX. The current Ask-Copilot prompt assumes
 schema guidance is supplied separately; it does not register instructions with other AI tools.
+
+For **LH-CLI-007**, the VSIX additionally bundles a Node-only stdio MCP server with self-describing
+read/reply tools named **`lighthouse-codereview`**. `scripts\setup-mcp.ps1` automates the explicit
+user-level opt-in, while **Configure Copilot CLI MCP** remains the GUI fallback, reusable across
+new repositories/worktrees without repository configuration. It needs Node.js 22+; core review
+does not. See [Local MCP setup](mcp-setup.md) for setup,
+limits, workspace binding, update/removal behavior, and the distinction from Ask Copilot.

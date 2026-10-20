@@ -2,8 +2,8 @@
 
 Lighthouse review content is persisted as plain JSON under a workspace's `.vscode/lighthouse-reviews/`
 directory. There is no review database and no network state. The schema source of truth is
-`src/reviewModel.ts` (types, parse, migration — deliberately `vscode`-free) and `src/reviewStore.ts`
-(serialize, load, mutate).
+`src/reviewModel.ts` (types, parse, migration), `src/reviewCore.ts` (pure serialization/mutations),
+and `src/reviewPersistence.ts` (coordinated transactions). `src/reviewStore.ts` adapts these to VS Code.
 
 ## 1. On-disk layout
 
@@ -206,11 +206,31 @@ Startup/review selection and explicit Refresh reconcile persisted checks,
 including hidden/deleted paths. Comment-only/UI refreshes do not launch file-hash scans.
 Changes made and restored before validation, or while inactive, are not an edit history.
 
-Checklist and discussion mutations share a per-review queue, reload the latest JSON, and reject
-observed external edits before writing. This is not an atomic cross-process compare-and-swap.
+Checklist and discussion mutations share a per-review queue and cooperative interprocess lock,
+reload the latest JSON, and reject observed external edits before atomic replacement. The MCP
+writer participates in the same protocol. This is not compare-and-swap against arbitrary writers
+that ignore the lock, including older extension versions or direct manual JSON edits.
 Unreadable files, failed Git queries, and write errors are reported as unverified/error states,
 never substituted with empty content. Checking remains a lazy first mutation that creates
 `comments.json`; mere rendering does not.
+
+### MCP read/reply contract
+
+MCP adds no database, request ledger, or review schema version. Read tools create no files.
+`get_review` returns thread summaries with the first 64 Unicode code points of the first comment,
+without rendering/trimming the text or appending an ellipsis, plus a truncation flag.
+`get_thread` returns full paginated discussions. Legacy ID-less references are explicitly read-only.
+
+`reply_to_thread` requires an existing uniquely identified thread, agent author metadata, a saved
+revision, and a caller-generated request ID. The server generates the comment ID/timestamp and
+preserves thread state, checklist snapshots, per-comment tags, and unrelated raw document fields.
+Its deterministic `c-mcp-<hash>` ID encodes the scope/thread/request identity; identical retries
+return the saved reply, while a changed payload for that request is a conflict. Check replay
+identity before revision conflicts so a lost successful response can be retried safely.
+
+Mutations preserve v1 authors when upgrading to canonical v2. MCP refuses corrupt/future schemas
+and ambiguous IDs instead of salvaging them into a writable empty review. The UI's tolerant
+display parser remains available; it is not a substitute for strict MCP write validation.
 
 ### Disposable branch-local Git metadata
 
