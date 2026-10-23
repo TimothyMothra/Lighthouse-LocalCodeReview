@@ -392,7 +392,7 @@ test('webview script separates synchronous DOM time from two-frame opportunity a
 	assert.equal(messages.length, 3);
 });
 
-test('lazy startup stays Git-free before demand, retries cleanly, shares snapshots and retains ref races', async () => {
+test('lazy startup stays Git-free before demand, retries cleanly, shares snapshots and retains ref races', async (t) => {
 	const commands = new Map();
 	const panes = new Map();
 	const noop = () => {};
@@ -401,6 +401,7 @@ test('lazy startup stays Git-free before demand, retries cleanly, shares snapsho
 	const channel = { appendLine: noop, dispose: noop };
 	const watches = [];
 	const failures = [];
+	const notifications = [], refreshProgress = [];
 	const watcher = (pattern) => {
 		const change = emitter();
 		const item = { onDidCreate: disposable, onDidChange: change.event, onDidDelete: disposable,
@@ -441,7 +442,8 @@ test('lazy startup stays Git-free before demand, retries cleanly, shares snapsho
 				assert.match(options.defaultUri.fsPath, /lighthouse-startup\.json$/);
 				return { fsPath: 'fixture-export' };
 			},
-			showInformationMessage: noop, showErrorMessage: (message) => failures.push(message),
+			showInformationMessage: (message) => notifications.push(message),
+			showErrorMessage: (message) => failures.push(message),
 		},
 		commands: { registerCommand: (name, handler) => { commands.set(name, handler); return disposable(); } },
 	};
@@ -450,19 +452,25 @@ test('lazy startup stays Git-free before demand, retries cleanly, shares snapsho
 	let comparisonRefreshes = 0, fileRefreshes = 0, invalidations = 0;
 	let waitForRepository, releaseDefaults;
 	const defaultsReady = new Promise((resolve) => { releaseDefaults = resolve; });
-	class Provider { refresh() {} revealForUri() {} resolveWebviewView() {} invalidateBranches() { invalidations++; } }
+	class Provider {
+		pane = 'conversations';
+		refresh() {} revealForUri() {} resolveWebviewView() {} invalidateBranches() { invalidations++; }
+		setRefreshProgress(id, running) { refreshProgress.push({ id, running, pane: this.pane }); }
+	}
 	class ComparisonProvider extends Provider {
-		constructor(...args) { super(); waitForRepository = args[4]; }
+		constructor(...args) { super(); this.pane = 'comparison'; waitForRepository = args[4]; }
 		refresh() { comparisonRefreshes++; }
 	}
-	class FilesProvider extends Provider { refresh() { fileRefreshes++; } }
+	class FilesProvider extends Provider { pane = 'files'; refresh() { fileRefreshes++; } }
 	let commentRenders = 0, rootQueries = 0, replyCalls = 0, conversationOpens = 0;
 	let repoChanged, refsChanged, resolveCalls = 0, snapshotCalls = 0, raceDuringResolve = true;
 	let failDefaultsOnce = true;
 	const snapshots = [];
 	class Comments { render() { commentRenders++; } dispose() {} handleReply() { replyCalls++; } }
 	class StatusBar { update() {} dispose() {} }
+	let comparison;
 	class Comparison {
+		constructor() { comparison = this; }
 		async computeDefaults(snapshot) {
 			assert.equal(watches.filter((watch) => !watch.disposed).length, 3, 'HEAD/shared-ref watches must precede metadata capture');
 			await defaultsReady;
@@ -610,6 +618,71 @@ test('lazy startup stays Git-free before demand, retries cleanly, shares snapsho
 		await new Promise((resolve) => setTimeout(resolve, 650));
 		assert.equal(resolveCalls, 4, 'a ref event during resolution retains a trailing fresh pass');
 		assert.equal(invalidations, 4, 'each initialization invalidates unwatched cached data; only actual ref events add more');
+		const progressMessages = (id, running) => ['comparison', 'files', 'conversations'].map((pane) => ({ id, running, pane }));
+		await t.test('both refresh commands start feedback before work, coalesce and toast one completion', async () => {
+			let finish, manualResolutions = 0;
+			comparison.base = 'main';
+			comparison.compare = 'feature';
+			comparison.review = { threads: [] };
+			comparison.resolve = () => {
+				manualResolutions++;
+				return new Promise((resolve) => { finish = resolve; });
+			};
+			const before = notifications.length;
+			const first = commands.get('lighthouse.refreshAll')();
+			const second = commands.get('lighthouse.refresh')();
+			assert.deepEqual(refreshProgress, progressMessages(1, true),
+				'All three panes show activity before initialization/resolve yields');
+			await new Promise(setImmediate);
+			assert.equal(manualResolutions, 1);
+			assert.equal(notifications.length, before);
+			finish();
+			await Promise.all([first, second]);
+			assert.deepEqual(refreshProgress, [...progressMessages(1, true), ...progressMessages(1, false)]);
+			assert.equal(notifications.length, before + 1);
+			assert.match(notifications.at(-1), /0 threads loaded/);
+		});
+		await t.test('a failed explicit refresh ends feedback and toasts an error instead of success', async () => {
+			comparison.resolve = async () => { throw new Error('Refresh Git read failed'); };
+			const before = notifications.length;
+			await assert.rejects(commands.get('lighthouse.refresh')(), /Refresh Git read failed/);
+			assert.equal(notifications.length, before);
+			assert.match(failures.at(-1), /refresh failed: Refresh Git read failed/);
+			assert.equal(refreshProgress.length, 12);
+			assert.deepEqual(refreshProgress.slice(-6), [...progressMessages(2, true), ...progressMessages(2, false)]);
+		});
+		await t.test('any pane toolbar shows progress in all three panes while refreshing shared data', async () => {
+			comparison.resolve = async () => {};
+			const menus = require('../package.json').contributes.menus['view/title'];
+			for (const view of ['lighthouse.comparison', 'lighthouse.files', 'lighthouse.conversations']) {
+				const action = menus.find((item) => item.when === `view == ${view}` && /refresh/i.test(item.command));
+				const before = refreshProgress.length;
+				const comparisonsBefore = comparisonRefreshes, filesBefore = fileRefreshes;
+				await commands.get(action.command)();
+				const id = refreshProgress.at(-1).id;
+				assert.deepEqual(refreshProgress.slice(before), [...progressMessages(id, true), ...progressMessages(id, false)]);
+				assert.equal(comparisonRefreshes, comparisonsBefore + 1);
+				assert.equal(fileRefreshes, filesBefore + 1);
+			}
+		});
+		await t.test('clicks in another pane share the running refresh without duplicating progress or toasts', async () => {
+			let finish, manualResolutions = 0;
+			comparison.resolve = () => {
+				manualResolutions++;
+				return new Promise((resolve) => { finish = resolve; });
+			};
+			const before = refreshProgress.length, toastsBefore = notifications.length;
+			const first = commands.get('lighthouse.refreshFiles')();
+			const second = commands.get('lighthouse.refreshThreads')();
+			await new Promise(setImmediate);
+			assert.equal(manualResolutions, 1);
+			const id = refreshProgress.at(-1).id;
+			assert.deepEqual(refreshProgress.slice(before), progressMessages(id, true));
+			finish();
+			await Promise.all([first, second]);
+			assert.deepEqual(refreshProgress.slice(before), [...progressMessages(id, true), ...progressMessages(id, false)]);
+			assert.equal(notifications.length, toastsBefore + 1);
+		});
 	} finally {
 		releaseDefaults();
 		release({ root: 'fixture-workspace', headPath: path.resolve('.git', 'HEAD'), commonDir: path.resolve('.git') });

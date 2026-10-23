@@ -2,7 +2,7 @@
   "name": "lighthouse",
   "displayName": "Lighthouse: Local Code Review",
   "description": "Local-only code review with reviews, threads, and Copilot-ready comment schema.",
-  "version": "2026.1020.2",
+  "version": "2026.1023.4",
   "publisher": "TimothyMothra",
   "private": true,
   "license": "MIT",
@@ -51,7 +51,7 @@
       "activitybar": [
         {
           "id": "lighthouse",
-          "title": "Lighthouse: Local Code Review (2026.1020.2)",
+          "title": "Lighthouse: Local Code Review (2026.1023.4)",
           "icon": "media/lighthouse.svg"
         }
       ]
@@ -215,6 +215,16 @@
       {
         "command": "lighthouse.refreshAll",
         "title": "Lighthouse: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "lighthouse.refreshFiles",
+        "title": "Lighthouse: Refresh Changed Files",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "lighthouse.refreshThreads",
+        "title": "Lighthouse: Refresh Threads",
         "icon": "$(refresh)"
       },
       {
@@ -434,7 +444,7 @@
           "group": "navigation@2"
         },
         {
-          "command": "lighthouse.refreshAll",
+          "command": "lighthouse.refreshFiles",
           "when": "view == lighthouse.files",
           "group": "navigation@3"
         },
@@ -449,7 +459,7 @@
           "group": "navigation@0"
         },
         {
-          "command": "lighthouse.refreshAll",
+          "command": "lighthouse.refreshThreads",
           "when": "view == lighthouse.conversations",
           "group": "navigation@1"
         }
@@ -498,6 +508,14 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "lighthouse.refreshFiles",
+          "when": "false"
+        },
+        {
+          "command": "lighthouse.refreshThreads",
+          "when": "false"
+        },
         {
           "command": "lighthouse.viewConversation",
           "when": "false"

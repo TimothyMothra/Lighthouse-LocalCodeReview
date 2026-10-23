@@ -149,6 +149,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		'lighthouse.createOrReply', 'lighthouse.resolveThread', 'lighthouse.unresolveThread',
 		'lighthouse.toggleThreadResolved', 'lighthouse.askCopilotThread', 'lighthouse.askCopilotReview',
 		'lighthouse.copyCommitId', 'lighthouse.copyBranchName', 'lighthouse.copyDirPath',
+		// ASSUMPTION: explicit refresh starts its feedback before any deferred initialization.
+		'lighthouse.refresh', 'lighthouse.refreshAll', 'lighthouse.refreshFiles', 'lighthouse.refreshThreads',
 	]);
 	const registerCommand = <Args extends unknown[]>(command: string, handler: (...args: Args) => unknown) =>
 		vscode.commands.registerCommand(command, async (...args: Args) => {
@@ -337,21 +339,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	);
 
 	// Refresh all views + inline comments + status bar together.
-	const refreshAll = (reason = 'command-or-review-action', comparisonChanged = true) => {
-		// Dispatch stays fire-and-forget; child spans retain this refresh's correlation context.
-		void trace('refresh.dispatch', async () => {
+	const refreshAll = (reason = 'command-or-review-action', comparisonChanged = true, waitForData = false): Promise<void> => {
+		const completion = trace('refresh.dispatch', async () => {
 			event('refresh.request', { reason });
 			reviewedFiles.reconcile(reason);
-			if (reason === 'manual-refresh' || reason === 'manual-resolve-refresh') { conversationDocuments.refresh(); }
-			if (reason === 'manual-refresh' || reason === 'manual-resolve-refresh') { conversationPages.refresh(); }
-			if (comparisonChanged) {
-				comparisonProvider.refresh(['manual-refresh', 'manual-resolve-refresh', 'git-operation'].includes(reason));
+			const pending: Promise<unknown>[] = [];
+			if (reason === 'manual-refresh' || reason === 'manual-resolve-refresh') {
+				conversationDocuments.refresh();
+				pending.push(conversationPages.refresh(undefined, waitForData));
 			}
-			filesProvider.refresh();
-			conversationsProvider.refresh();
-			void comments.render();
-			void statusBar.update();
+			if (comparisonChanged) {
+				pending.push(comparisonProvider.refresh(['manual-refresh', 'manual-resolve-refresh', 'git-operation'].includes(reason)));
+			}
+			pending.push(filesProvider.refresh(waitForData), conversationsProvider.refresh(), comments.render(), statusBar.update());
+			// Keep feedback active until every dispatched view settles, including partial failures.
+			const results = await Promise.allSettled(pending);
+			const failure = results.find((result) => result.status === 'rejected');
+			if (failure?.status === 'rejected') { throw failure.reason; }
 		}, { reason });
+		// Automatic callers remain fire-and-forget, but failures are still visible in Output.
+		void completion.catch((error) => log(`Could not refresh review views: ${errMessage(error)}`));
+		return completion;
 	};
 
 	// Read-only content provider that serves historical file blobs for the diff view.
@@ -410,11 +418,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	// /tag autocomplete on the comment input box.
 	context.subscriptions.push(registerTagCompletion());
 
-	// Manual refresh (also wired to the view/title button).
+	let refreshRequest = 0;
+	const refreshProviders = [comparisonProvider, filesProvider, conversationsProvider];
+	let manualRefresh: Promise<void> | undefined;
+	const refreshManually = (): Promise<void> => {
+		// ASSUMPTION: a manual refresh updates all three panes, so all three show activity.
+		// Repeated clicks join the running work without restarting animations or duplicating toasts.
+		if (manualRefresh) { return manualRefresh; }
+		const id = ++refreshRequest;
+		for (const provider of refreshProviders) { provider.setRefreshProgress(id, true); }
+		manualRefresh = (async () => {
+			try {
+				await ensureComparison('manual-refresh');
+				await active.resolve();
+				await refreshAll('manual-resolve-refresh', true, true);
+				if (active.baselineError) {
+					void vscode.window.showWarningMessage(`Lighthouse: refresh could not resolve the comparison: ${active.baselineError}`);
+				} else if (!active.base || !active.compare) {
+					void vscode.window.showInformationMessage('Lighthouse: refresh complete. Select base and compare branches to load a review.');
+				} else {
+					const count = active.review?.threads.length ?? 0;
+					void vscode.window.showInformationMessage(`Lighthouse: comparison, changed files, and local reviews refreshed. ${count} thread${count === 1 ? '' : 's'} loaded.`);
+				}
+			} catch (error) {
+				log(`Manual refresh failed: ${errMessage(error)}`);
+				void vscode.window.showErrorMessage(`Lighthouse: refresh failed: ${errMessage(error)}`);
+				throw error;
+			} finally {
+				for (const provider of refreshProviders) { provider.setRefreshProgress(id, false); }
+				manualRefresh = undefined;
+			}
+		})();
+		return manualRefresh;
+	};
+
+	// Both command-palette refreshes and every pane's title-bar button share this lifecycle.
 	context.subscriptions.push(
-		registerCommand('lighthouse.refresh', () => {
-			refreshAll('manual-refresh');
-		}),
+		registerCommand('lighthouse.refresh', refreshManually),
 	);
 
 	// Open a thread's file and reveal `filePath:startLine`.
@@ -600,10 +640,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		registerCommand('lighthouse.copyComparePath', () =>
 			comparisonProvider.copyCompareBranchPath(),
 		),
-		registerCommand('lighthouse.refreshAll', async () => {
-			await active.resolve();
-			refreshAll('manual-resolve-refresh');
-		}),
+		registerCommand('lighthouse.refreshAll', refreshManually),
+		registerCommand('lighthouse.refreshFiles', refreshManually),
+		registerCommand('lighthouse.refreshThreads', refreshManually),
 		registerCommand('lighthouse.filesExpandAll', () => {
 			filesProvider.setExpanded(true);
 		}),

@@ -1,6 +1,7 @@
 import type * as vscode from 'vscode';
 import { getNonce } from './webviewShell';
 import { THREAD_ICONS } from './threadIcons';
+import { WEBVIEW_PROGRESS_CSS, WEBVIEW_PROGRESS_JS } from './webviewProgress';
 
 /**
  * Conversation webview shell.
@@ -41,6 +42,8 @@ export function conversationPageHtml(webview: vscode.Webview): string {
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+${WEBVIEW_PROGRESS_CSS}
+.commit-progress[hidden] { display: block !important; }
 body.vscode-light, body.vscode-high-contrast-light { color-scheme: light; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, #3f4754); border-radius: 8px; }
@@ -683,6 +686,9 @@ let pendingSubmission = null;
 let previewRequest = 0;
 let previewTimer;
 const messageSignatures = new WeakMap();
+${WEBVIEW_PROGRESS_JS}
+const refreshProgress = createRefreshProgress(document.getElementById('refresh-progress'));
+let refreshId = 0;
 
 function setButtonLabel(button, icon, title) {
   button.textContent = '';
@@ -1150,7 +1156,14 @@ function handleMessage(event) {
         setStatus(message.message || 'The action failed.');
       }
     } else if (message.action === 'refresh' || message.action === 'copyText' || message.action === 'openLink' || message.action === 'openCode' || message.action === 'preview') {
+      if (message.action === 'refresh') {
+        pendingAction = '';
+        refreshProgress.end(refreshId);
+        syncBusyIndicator(false);
+        if (pageData) { renderState({ ...pageData, busy: false }); }
+      }
       if (message.ok) {
+        if (message.action === 'refresh') { setAlert(''); }
         setStatus(message.message || 'Done.');
       } else {
         setAlert(message.message || 'The action failed.');
@@ -1227,6 +1240,10 @@ nodes.resolveButton.addEventListener('click', () => {
 });
 nodes.refreshButton.addEventListener('click', () => {
   if (pendingAction) { return; }
+  pendingAction = 'refresh';
+  refreshProgress.start(++refreshId);
+  syncBusyIndicator(true);
+  if (pageData) { renderComposer(pageData); renderSidebar(pageData); }
   setStatus('Refreshing…');
   vscode.postMessage({ type: 'refresh' });
 });
@@ -1260,6 +1277,7 @@ setStatus('Loading thread…');
 <body>
   <div class="shell">
     <header class="hero">
+      <div class="commit-progress" id="refresh-progress" role="progressbar" aria-label="Refreshing thread" hidden></div>
       <div class="eyebrow"><span class="eyebrow-badge">L</span><span>Lighthouse / Thread</span></div>
       <div class="title-row">
         <div class="title-block">

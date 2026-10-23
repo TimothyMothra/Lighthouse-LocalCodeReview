@@ -1,3 +1,5 @@
+import { WEBVIEW_PROGRESS_CSS, WEBVIEW_PROGRESS_JS } from './webviewProgress';
+
 /**
  * Compact commit-tree renderer embedded in Comparison. Keeps lazy file expansion and diff actions
  * from the former Commits pane; native VS Code context menus carry the full SHA to Set as Base.
@@ -14,21 +16,7 @@ export const COMMITS_CSS = `
 .commit-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 .commit-content { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .commit-content[hidden] { display: none; }
-.commit-progress { height: 2px; flex: 0 0 auto; overflow: hidden; position: relative; }
-/* ASSUMPTION: the 2px progress slot stays reserved, so loading never moves the commit rows. */
-.commit-progress[hidden] { display: block; visibility: hidden; }
-.commit-progress[hidden]::before { animation: none; }
-.commit-progress::before {
-	content: ''; position: absolute; left: 0; width: 2%; height: 100%;
-	background: var(--vscode-progressBar-background, var(--vscode-focusBorder));
-	/* ASSUMPTION: essential progress motion stays enabled, as in VS Code's native progress bar. */
-	animation: commit-progress-slide 4s linear infinite;
-}
-@keyframes commit-progress-slide {
-	from { transform: translateX(0%) scaleX(1); }
-	50% { transform: translateX(2500%) scaleX(3); }
-	to { transform: translateX(4900%) scaleX(1); }
-}
+${WEBVIEW_PROGRESS_CSS}
 .commit-toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 4px; padding: 5px 0; }
 .mode-btn, .more-btn {
 	padding: 3px 6px; border: 1px solid transparent; border-radius: 2px; cursor: pointer;
@@ -100,6 +88,8 @@ const rows = document.getElementById('commit-rows');
 const status = document.getElementById('commit-status');
 const more = document.getElementById('commit-more');
 const progress = document.getElementById('commit-progress');
+${WEBVIEW_PROGRESS_JS}
+const refreshProgress = createRefreshProgress(progress, updateProgress);
 const pane = document.getElementById('commit-pane');
 const toggleButton = document.getElementById('commit-toggle');
 const content = document.getElementById('commit-content');
@@ -259,8 +249,12 @@ function renderCommit(c) {
 	return el;
 }
 
+function updateProgress() {
+	progress.hidden = !(refreshProgress.visible() || actionPending || baseActionPending || (sectionOpen && pending));
+}
+
 function paint() {
-	progress.hidden = !(actionPending || baseActionPending || (sectionOpen && pending));
+	updateProgress();
 	// ASSUMPTION: collapsed commits do not need DOM work; retain data until the user expands again.
 	if (!sectionOpen) { return; }
 	const focusedSha = rows.querySelector('.commit-row:focus')?.getAttribute('data-vscode-context');

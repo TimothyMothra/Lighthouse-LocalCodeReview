@@ -54,9 +54,13 @@ export class ComparisonWebviewProvider implements vscode.WebviewViewProvider {
 	) {}
 
 	/** Kept named `refresh` so the extension's `refreshAll` closure is unchanged. */
-	refresh(reloadBranches = false): void {
+	refresh(reloadBranches = false): Promise<void> {
 		if (reloadBranches) { this.invalidateBranches(); }
-		void this.postState('refresh-or-action', reloadBranches);
+		return this.postState('refresh-or-action', reloadBranches);
+	}
+
+	setRefreshProgress(id: number, running: boolean): void {
+		void this.view?.webview.postMessage({ type: 'refreshProgress', id, running });
 	}
 
 	/** Native context menus carry the immutable SHA of the selected history row. */
@@ -605,6 +609,8 @@ ${COMMITS_CSS}
 </style>
 </head>
 <body>
+  <!-- ASSUMPTION: pane-wide activity stays under the native title, outside scrolling content. -->
+  <div class="commit-progress" id="commit-progress" role="progressbar" aria-label="Updating comparison" hidden></div>
   <div class="comparison-scroll" id="comparison-scroll" tabindex="0" role="region" aria-label="Comparison selectors and commits">
   <div class="selectors">
   <div class="field" data-row="base">
@@ -630,7 +636,6 @@ ${COMMITS_CSS}
   </div>
   <div class="commit-pane collapsed" id="commit-pane">
     <button class="commit-toggle" id="commit-toggle" type="button" aria-expanded="false" aria-controls="commit-content">▸ Commits</button>
-    <div class="commit-progress" id="commit-progress" role="progressbar" aria-label="Updating comparison" hidden></div>
     <div class="commit-content" id="commit-content" hidden>
       <div class="commit-toolbar">
         <button class="mode-btn" id="commit-history" type="button" aria-pressed="true" title="First-parent source history; right-click a commit to Set as Base">↶ History</button>

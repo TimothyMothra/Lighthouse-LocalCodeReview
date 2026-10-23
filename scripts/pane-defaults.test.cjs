@@ -17,7 +17,7 @@ function loadCompiled(name, mocks) {
 	return module.exports;
 }
 
-function fixture(name) {
+function fixture(name, mocks = {}) {
 	const states = [], commands = [], values = new Map();
 	const memento = {
 		get: (key, fallback) => values.has(key) ? values.get(key) : fallback,
@@ -30,6 +30,7 @@ function fixture(name) {
 			PaneMetrics: class { post(state) { states.push(state); } build(work) { return work(); } },
 			logBuild() {},
 		},
+		...mocks,
 	});
 	return { exports, states, commands, memento, values };
 }
@@ -83,6 +84,31 @@ test('Commits and Changed Files use downward artwork rotated right only when col
 	assert.match(files, /\.twisty\s*\{[^}]*color:\s*var\(--vscode-icon-foreground\)/);
 });
 
+test('Files and Threads share full-sweep refresh feedback even when their contents are empty', () => {
+	for (const [name, type] of [['filesWebview', 'FilesWebviewProvider'], ['conversationsWebview', 'ConversationsWebviewProvider']]) {
+		const f = fixture(name);
+		const provider = name === 'filesWebview'
+			? new f.exports[type](() => undefined, {}, () => {}, f.memento)
+			: new f.exports[type](() => undefined, f.memento);
+		const html = provider.html({ cspSource: 'fixture' });
+		const handlers = {}, listeners = [], progress = {
+			hidden: true, addEventListener: (type, handler) => { handlers[type] = handler; },
+		};
+		const context = vm.createContext({
+			document: { getElementById: (id) => { assert.equal(id, 'refresh-progress'); return progress; } },
+			window: { addEventListener: (_, handler) => listeners.push(handler) },
+			acquireVsCodeApi: () => ({ postMessage() {} }),
+		});
+		vm.runInContext([...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)][0][1], context);
+		for (const running of [true, false]) {
+			for (const handler of listeners) { handler({ data: { type: 'refreshProgress', id: 1, running } }); }
+			assert.equal(progress.hidden, false);
+		}
+		handlers.animationiteration({ animationName: 'commit-progress-slide' });
+		assert.equal(progress.hidden, true);
+	}
+});
+
 test('Files sends an expanded initial tree, while explicit expansion commands remain authoritative', async () => {
 	const f = fixture('filesWebview');
 	const provider = new f.exports.FilesWebviewProvider(() => undefined, {}, () => {}, f.memento);
@@ -92,6 +118,34 @@ test('Files sends an expanded initial tree, while explicit expansion commands re
 	provider.setExpanded(false);
 	await provider.postState();
 	assert.equal(f.states.at(-1).expanded, false);
+});
+
+test('explicit Files refresh waits for split-view data and surfaces working-tree read failures', async () => {
+	let release, failUncommitted = false;
+	const f = fixture('filesWebview', {
+		vscode: { workspace: { getConfiguration: () => ({ get: () => false }) } },
+		'./git': { changedFilesUncommitted: async () => {
+			if (failUncommitted) { throw new Error('Working-tree read failed'); }
+			return { staged: [], unstaged: [], untracked: [] };
+		} },
+	});
+	const active = {
+		base: 'main', compare: 'feature', baselineCommit: 'baseline', comparisonKey: 'comparison',
+		review: { reviewedFiles: [] },
+		getChangedFiles: () => new Promise((resolve) => { release = resolve; }),
+	};
+	const provider = new f.exports.FilesWebviewProvider(() => active, {}, () => {}, f.memento);
+	provider.view = {};
+	let settled = false;
+	const pending = provider.refresh(true).then(() => { settled = true; });
+	await new Promise(setImmediate);
+	assert.equal(settled, false);
+	release([{ relPath: 'saved.ts', status: 'M' }]);
+	await pending;
+	assert.equal(f.states.at(-1).tree.files[0].name, 'saved.ts');
+	assert.equal(f.states.at(-1).loading, undefined);
+	failUncommitted = true;
+	await assert.rejects(provider.refresh(true), /Working-tree read failed/);
 });
 
 test('Files expands initially without reopening manually collapsed folders on every refresh', () => {

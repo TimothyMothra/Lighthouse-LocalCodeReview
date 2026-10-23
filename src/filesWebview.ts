@@ -166,8 +166,12 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 	}
 
 	/** External refresh (called by refreshAll / after a checkbox toggle). */
-	refresh(): void {
-		void this.postState();
+	refresh(waitForData = false): Promise<void> {
+		return this.postState('refresh-or-action', waitForData);
+	}
+
+	setRefreshProgress(id: number, running: boolean): void {
+		void this.view?.webview.postMessage({ type: 'refreshProgress', id, running });
 	}
 
 	refreshAvailability(): void {
@@ -276,11 +280,11 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 	}
 
 	/** Build the current tree and push it to the webview (mirrors filesView.ts getChildren). */
-	private async postState(reason = 'refresh-or-action'): Promise<void> {
-		return this.metrics.build(() => this.buildState(), reason);
+	private async postState(reason = 'refresh-or-action', waitForData = false): Promise<void> {
+		return this.metrics.build(() => this.buildState(waitForData), reason);
 	}
 
-	private async buildState(): Promise<void> {
+	private async buildState(waitForData = false): Promise<void> {
 		if (!this.view) {
 			return;
 		}
@@ -310,7 +314,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 			// view (net effect vs the merge-base), not a bug.
 			const [cum, uc] = await Promise.all([
 				active.getChangedFilesCumulative(),
-				this.loadUncommitted(active),
+				this.loadUncommitted(active, waitForData),
 			]);
 			if (active.comparisonKey !== key) { return; }
 			const tBuildCum = now();
@@ -337,6 +341,14 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
+		// ASSUMPTION: explicit refresh must finish loading before reporting success; ordinary
+		// background refreshes retain the existing lazy placeholder path.
+		if (waitForData && this.loadedKey !== key) {
+			const files = await active.getChangedFiles();
+			if (active.comparisonKey !== key) { return; }
+			this.paths = files;
+			this.loadedKey = key;
+		}
 		if (this.loadedKey !== key) {
 			// Kick the async load exactly once per key, then show the loading placeholder.
 			if (this.loadingKey !== key) {
@@ -361,7 +373,7 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 
 		// Uncommitted (staged/unstaged/untracked) is live working-tree state, independent of the
 		// base...compare pair — load it fresh on every render so edits appear without a key change.
-		const uc = await this.loadUncommitted(active);
+		const uc = await this.loadUncommitted(active, waitForData);
 		if (active.comparisonKey !== key) { return; }
 		const tBuild = now();
 		const merged = mergeFiles(this.paths, uc, active.review?.reviewedFiles ?? []);
@@ -389,12 +401,14 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider {
 	 * Load the live staged + unstaged + untracked changes for merging into the unified tree. These git
 	 * ops run against the live index/worktree/HEAD, independent of the ActiveComparison base/compare
 	 * shas. Returns the raw groups (not wire rows) so `mergeFiles` can weave them into the folder tree
-	 * by path. Never throws — a git failure just yields empty groups.
+	 * by path. Background reads retain their empty-group fallback; explicit refresh propagates
+	 * errors so its completion toast cannot claim success after a failed Git read.
 	 */
-	private async loadUncommitted(active: ActiveComparison): Promise<UncommittedChanges> {
+	private async loadUncommitted(active: ActiveComparison, strict = false): Promise<UncommittedChanges> {
 		try {
 			return await trace('files.uncommitted', () => changedFilesUncommitted(active.repoRootFsPath));
-		} catch {
+		} catch (error) {
+			if (strict) { throw error; }
 			event('files.uncommittedFallback', { fallback: 'empty-groups' });
 			return { staged: [], unstaged: [], untracked: [] };
 		}

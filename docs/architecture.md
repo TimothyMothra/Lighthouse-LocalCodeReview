@@ -134,13 +134,22 @@ The **Effective baseline** is the exact commit used on the left of branch-review
   target rediscovery. Ref events/manual refresh invalidate reuse; the preview is not a diff boundary.
   Baseline and review data are always re-resolved. Cache hints are scoped to the repo and source
   SHA, are not persisted across reloads, and fall back to discovery when unavailable/changed.
-  A themed horizontal progress bar runs above Commits during the action and any open Review reload.
+  A themed horizontal progress bar stays directly below the native Comparison title, outside the
+  scrolling selectors and Commits, during the action and any open Review reload.
   Like VS Code's native progress bar, this essential activity cue continues animating under reduced
   motion; it does not change OS/editor settings.
   Its narrow bit uses the native four-second translate/scale sweep. The 2px slot remains reserved
   when idle; only its visibility changes, so commit rows do not shift during loading.
   Collapsed commit sections are not forced to load. Failed actions restore authoritative input
   state and surface the error; stale source/action responses cannot overwrite a newer choice.
+- **Explicit Refresh feedback:** the Refresh commands and all three pane title-bar buttons share
+  one awaited refresh and activate all three panes' progress indicators to represent that shared
+  work. Comparison's indicator remains directly below its native title, outside scrolling content.
+  Thread-page Refresh has the same feedback locally and refreshes only that thread page.
+  Even an immediate no-change result runs one complete four-second CSS sweep;
+  data and result toasts are not delayed to finish the animation. Repeated clicks during the same
+  refresh join that work. Completion toasts summarize the result; failures are reported instead of
+  success. Automatic background refreshes do not emit these toasts or minimum-duration animations.
 - Multiple valid merge-bases use Git's normal default selection, matching the approved automatic
   workflow. This does not claim that the chosen ancestor is a unique original fork point.
 - Missing refs, no shared ancestry, and incomparable candidate baselines

@@ -685,6 +685,48 @@ test('horizontal progress covers the Review reload and ignores older action comp
 	assert.ok(ui.messages.some((message) => message.type === 'baseActionContent' && message.id === 3));
 });
 
+test('Comparison progress is directly under the native pane title, outside scrolling selectors and commits', () => {
+	const ui = webview();
+	const body = ui.html.split('<body>')[1].split('<script>')[0].replace(/<!--[\s\S]*?-->/g, '');
+	assert.match(body, /^\s*<div\b[^>]*\bid="commit-progress"[^>]*><\/div>\s*<div\b[^>]*\bid="comparison-scroll"/);
+	assert.equal([...body.matchAll(/\bid="commit-progress"/g)].length, 1);
+});
+
+test('an immediate unchanged refresh completes a full sweep without opening collapsed commits', () => {
+	const ui = webview();
+	const progress = ui.get('commit-progress');
+	ui.state({ type: 'state', branches: [], compareCommit: 'a'.repeat(40) });
+	ui.state({ type: 'refreshProgress', id: 1, running: true });
+	assert.equal(progress.hidden, false);
+	ui.state({ type: 'refreshProgress', id: 1, running: false });
+	ui.state({ type: 'state', branches: [], compareCommit: 'a'.repeat(40) });
+	assert.equal(progress.hidden, false, 'Data completion must not cut the first animation short');
+	progress.listeners.animationiteration({ animationName: 'commit-progress-slide' });
+	assert.equal(progress.hidden, true);
+	assert.equal(ui.messages.filter((message) => message.type === 'loadCommits').length, 0);
+});
+
+test('refresh progress survives a full sweep while work is running and ignores stale completion', () => {
+	const ui = webview();
+	const progress = ui.get('commit-progress');
+	ui.state({ type: 'refreshProgress', id: 1, running: true });
+	progress.listeners.animationiteration({ animationName: 'commit-progress-slide' });
+	assert.equal(progress.hidden, false);
+	ui.state({ type: 'refreshProgress', id: 2, running: true });
+	ui.state({ type: 'refreshProgress', id: 1, running: false });
+	ui.state({ type: 'refreshProgress', id: 2, running: false });
+	assert.equal(progress.hidden, false, 'The second refresh needs its own complete sweep');
+	progress.listeners.animationiteration({ animationName: 'unrelated-animation' });
+	assert.equal(progress.hidden, false);
+	progress.listeners.animationiteration({ animationName: 'commit-progress-slide' });
+	assert.equal(progress.hidden, true);
+	ui.state({ type: 'refreshProgress', id: 3, running: true });
+	progress.listeners.animationiteration({ animationName: 'commit-progress-slide' });
+	assert.equal(progress.hidden, false);
+	ui.state({ type: 'refreshProgress', id: 3, running: false });
+	assert.equal(progress.hidden, true);
+});
+
 test('essential progress keeps its sweep under reduced motion, matching native VS Code progress', () => {
 	const ui = webview();
 	assert.match(ui.html, /animation:\s*commit-progress-slide\s+4s\s+linear\s+infinite/);

@@ -147,8 +147,12 @@ export class ConversationsWebviewProvider implements vscode.WebviewViewProvider 
 	}
 
 	/** External refresh (called by refreshAll and the Files→Conversations refresh hook). */
-	refresh(): void {
-		void this.postState();
+	refresh(): Promise<void> {
+		return this.postState();
+	}
+
+	setRefreshProgress(id: number, running: boolean): void {
+		void this.view?.webview.postMessage({ type: 'refreshProgress', id, running });
 	}
 
 	/**

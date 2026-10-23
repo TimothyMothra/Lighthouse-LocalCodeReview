@@ -23,6 +23,7 @@ function load(name, mocks) {
 function fixture() {
 	const root = path.resolve('private-workspace');
 	const files = new Map(), writes = [], directories = [], panels = [], usage = [], asks = [], errors = [], clipboard = [], links = [];
+	const notifications = [], warnings = [];
 	const uri = (fsPath) => ({ fsPath, scheme: 'file', toString: () => `file:${fsPath}` });
 	let readHook, writeHook;
 	class Emitter {
@@ -57,6 +58,8 @@ function fixture() {
 		window: {
 			createWebviewPanel: makePanel,
 			showErrorMessage: (message) => errors.push(message),
+			showInformationMessage: (message) => notifications.push(message),
+			showWarningMessage: (message) => warnings.push(message),
 		},
 		workspace: {
 			workspaceFolders: [{ uri: uri(root) }],
@@ -95,7 +98,7 @@ function fixture() {
 	const manager = new ConversationPages(hooks);
 	const review = store.emptyReview(root, 'feature', 'main');
 	return {
-		root, files, writes, directories, panels, usage, asks, errors, clipboard, links,
+		root, files, writes, directories, panels, usage, asks, errors, clipboard, links, notifications, warnings,
 		store, pageStore, manager, review, hooks, makePanel,
 		page: () => [...manager.pages.values()][0],
 		state: () => panels[0].messages.filter((message) => message.type === 'state').at(-1).data,
@@ -243,6 +246,31 @@ test('a failed Copilot launch after saving clears only the already-saved draft a
 	} finally { f.manager.dispose(); }
 });
 
+test('explicit thread refresh toasts describe no-change, changed and unavailable results without writing', async () => {
+	const f = fixture();
+	try {
+		const thread = f.store.addGeneralThread(f.review, 'Question', f.store.humanAuthor('Tester'));
+		f.files.set(f.review.sourceFile, JSON.stringify(f.store.serializeReview(f.review)));
+		await f.manager.open(conversationTarget(f.review.sourceFile, thread, 0));
+		await f.manager.handle(f.page(), { type: 'refresh' });
+		assert.equal(f.lastResult().ok, true);
+		assert.match(f.notifications.at(-1), /No changes/);
+		const external = JSON.parse(f.files.get(f.review.sourceFile));
+		external.threads[0].comments.push({ body: 'New reply' });
+		f.files.set(f.review.sourceFile, JSON.stringify(external));
+		await f.manager.handle(f.page(), { type: 'refresh' });
+		assert.equal(f.lastResult().ok, true);
+		assert.match(f.notifications.at(-1), /2 messages loaded/);
+		f.files.set(f.review.sourceFile, '{incomplete');
+		await f.manager.handle(f.page(), { type: 'refresh' });
+		assert.equal(f.lastResult().ok, false);
+		assert.equal(f.notifications.length, 2, 'Failures must not produce a success toast');
+		assert.equal(f.warnings.length, 1);
+		assert.equal(f.writes.length, 0);
+		await assert.rejects(f.manager.refresh(undefined, true), /open thread could not be refreshed/);
+	} finally { f.manager.dispose(); }
+});
+
 test('legacy pages are read-only and link handling does not execute command or file URLs', async () => {
 	const f = fixture();
 	try {
@@ -323,6 +351,17 @@ test('the real webview client boots, preserves drafts on refresh/errors, and cle
 	state();
 	assert.equal(node('composer-body').value, 'My **draft**');
 	assert.equal(persistent.draftBody, 'My **draft**');
+	node('refresh-button').handlers.click();
+	assert.equal(messages.at(-1).type, 'refresh');
+	assert.equal(node('refresh-progress').hidden, false);
+	const sent = messages.length;
+	node('refresh-button').handlers.click();
+	assert.equal(messages.length, sent, 'Repeated pending refresh clicks must not duplicate work');
+	receive({ data: { type: 'result', action: 'refresh', ok: true, message: 'Thread refreshed. No changes.' } });
+	assert.equal(node('composer-body').value, 'My **draft**');
+	assert.equal(node('refresh-progress').hidden, false, 'Immediate completion must finish one sweep');
+	node('refresh-progress').handlers.animationiteration({ animationName: 'commit-progress-slide' });
+	assert.equal(node('refresh-progress').hidden, true);
 	node('post-button').handlers.click();
 	assert.equal(node('composer-body').disabled, true);
 	assert.equal(messages.at(-1).type, 'post');

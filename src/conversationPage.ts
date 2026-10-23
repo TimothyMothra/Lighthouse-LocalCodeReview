@@ -131,12 +131,17 @@ export class ConversationPages implements vscode.Disposable, vscode.WebviewPanel
 		});
 	}
 
-	refresh(reviewFile?: vscode.Uri): void {
+	async refresh(reviewFile?: vscode.Uri, strict = false): Promise<void> {
+		const pending: Promise<boolean>[] = [];
 		for (const page of this.pages.values()) {
 			if (!reviewFile || reviewFileKey(page.reference.reviewFile) === reviewFileKey(reviewFile.fsPath)) {
-				void this.refreshPage(page);
+				pending.push(this.refreshPage(page));
 			}
 		}
+		const loaded = await Promise.all(pending);
+		// ASSUMPTION: background refreshes explain unavailable pages in-place; explicit refresh
+		// must also report the partial failure instead of presenting a successful result toast.
+		if (strict && loaded.some((value) => !value)) { throw new Error('An open thread could not be refreshed. See its banner for details.'); }
 	}
 
 	private async result(page: Page, action: string, ok: boolean, message?: string, clearDraft = false): Promise<void> {
@@ -237,8 +242,15 @@ export class ConversationPages implements vscode.Disposable, vscode.WebviewPanel
 				await this.result(page, action, true, 'Copilot was launched in the terminal. This page updates when replies are saved.');
 			} else if (action === 'refresh') {
 				recordUsage('pane.action', { pane: 'conversations', action: 'refreshConversation' });
+				const previous = JSON.stringify(page.data);
 				const loaded = await this.refreshPage(page);
-				await this.result(page, action, loaded, loaded ? 'Thread refreshed.' : page.data?.banner ?? 'A newer refresh is in progress.');
+				const count = page.data?.comments.length ?? 0;
+				const message = loaded
+					? previous === JSON.stringify(page.data) ? 'Thread refreshed. No changes.' : `Thread refreshed. ${count} message${count === 1 ? '' : 's'} loaded.`
+					: page.data?.banner ?? 'A newer refresh is in progress.';
+				await this.result(page, action, loaded, message);
+				if (loaded) { void vscode.window.showInformationMessage(`Lighthouse: ${message}`); }
+				else { void vscode.window.showWarningMessage(`Lighthouse: ${message}`); }
 			} else if (action === 'openCode') {
 				const { thread } = await this.savedThread(page);
 				if (!thread.filePath) { throw new Error('This is a review-wide thread with no code location.'); }
@@ -256,6 +268,7 @@ export class ConversationPages implements vscode.Disposable, vscode.WebviewPanel
 		} catch (error) {
 			event('conversation.pageActionFailed', { action, saved, ...errorFields(error) });
 			await this.result(page, action, false, saved ? `Message saved, but the follow-up action failed: ${messageOf(error)}` : messageOf(error), saved);
+			if (action === 'refresh') { void vscode.window.showErrorMessage(`Lighthouse: refresh failed: ${messageOf(error)}`); }
 		} finally {
 			if (mutation) { page.busy = false; await this.refreshPage(page); }
 		}

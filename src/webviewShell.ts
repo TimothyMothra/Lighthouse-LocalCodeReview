@@ -40,6 +40,7 @@
  */
 
 import * as vscode from 'vscode';
+import { WEBVIEW_PROGRESS_CSS, WEBVIEW_PROGRESS_JS } from './webviewProgress';
 
 /** DOM completion and a paint opportunity are separate signals; neither proves pixels were presented. */
 export function renderMetricsScript(): string {
@@ -120,6 +121,8 @@ export function webviewHtml(opts: WebviewHtmlOptions): string {
   // Panes capture \`const t0 = performance.now()\` when a {type:'state',...} message arrives,
   // render, then call reportRendered(view, count, t0).
   ${renderMetricsScript()}
+  ${WEBVIEW_PROGRESS_JS}
+  createRefreshProgress(document.getElementById('refresh-progress'));
 `;
 
 	return /* html */ `<!DOCTYPE html>
@@ -140,9 +143,13 @@ export function webviewHtml(opts: WebviewHtmlOptions): string {
   }
   a { color: var(--vscode-textLink-foreground); }
 ${styleCss}
+${WEBVIEW_PROGRESS_CSS}
+  /* ASSUMPTION: refresh feedback stays visible while long pane contents scroll. */
+  #refresh-progress { position: sticky; top: 0; z-index: 1; }
 </style>
 </head>
 <body>
+<div class="commit-progress" id="refresh-progress" role="progressbar" aria-label="Refreshing review" hidden></div>
 ${bodyHtml}
 <script nonce="${nonce}">${shellScript}</script>
 <script nonce="${nonce}">${scriptJs}</script>
